@@ -1,0 +1,64 @@
+name: Vyuha Regression Gate
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *"   # nightly at 2am UTC
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vyuha
+          POSTGRES_USER: vyuha
+          POSTGRES_PASSWORD: vyuha
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Start Vyuha API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
+          DATABASE_URL: postgresql+asyncpg://vyuha:vyuha@localhost:5432/vyuha
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          uv run uvicorn vyuha.orchestrator.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+
+      - name: Run regression test suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
+          DATABASE_URL: postgresql+asyncpg://vyuha:vyuha@localhost:5432/vyuha
+          REDIS_URL: redis://localhost:6379/0
+          REGRESSION_PASS_RATE: "0.97"
+        run: |
+          uv run python -m vyuha.ci.regression_runner \
+            --suite regression \
+            --fail-below ${{ env.REGRESSION_PASS_RATE }}
+
+      - name: Upload regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-report
+          path: regression_report.json

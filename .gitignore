@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+dist/
+build/
+*.egg
+
+# Node
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Railway / Docker
+.railway/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Assets / audio
+vyuha/assets/noise/*.wav
+vyuha/assets/noise/*.mp3
+
+# Alembic
+vyuha/.venv/
