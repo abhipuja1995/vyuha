@@ -27,8 +27,14 @@ def _make_pkg(name: str) -> MagicMock:
 _TOP_LEVEL = [
     "pydub", "scipy", "soundfile", "redis", "celery",
     "httpx", "sqlalchemy", "asyncpg", "alembic", "ulid",
-    "tenacity", "streamlit", "plotly", "pandas", "fastapi",
+    "tenacity", "streamlit", "plotly", "fastapi",
     "uvicorn", "multipart",
+    # asr subpackage heavy deps (llm_client, normalizer)
+    "joblib", "tqdm", "jsonlines",
+    "indicnlp", "transformers",
+    "google", "google.auth", "google.oauth2", "google.oauth2.service_account",
+    "google.auth.transport", "google.auth.transport.requests",
+    "vertexai", "vertexai.generative_models",
 ]
 
 for _mod in _TOP_LEVEL:
@@ -49,6 +55,9 @@ _SUB_MODULES = [
     "fastapi.middleware",
     "fastapi.responses",
     "fastapi.staticfiles",
+    "indicnlp.normalize",
+    "indicnlp.normalize.indic_normalize",
+    "google.auth.transport.requests",
 ]
 
 for _sub in _SUB_MODULES:
