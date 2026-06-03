@@ -4,7 +4,7 @@ from typing import Any
 
 import structlog
 
-from vyuha.models.scoring import EvaAScore, TurnResult
+from vyuha.models.scoring import EvaAScore, TurnResult, JudgeScore, JudgeCriterion
 from vyuha.models.test_case import TestCase
 from vyuha.scoring.judges import LLMJudge
 
@@ -21,6 +21,37 @@ Score from 0.0 to 1.0:
 - 0.0-0.3: Significant hallucination or critical policy violation
 
 Respond with JSON: {"score": <float>, "issues": [<string>], "reason": <string>}
+"""
+
+_JUDGE_CRITERIA_PROMPT = """
+Evaluate the agent's conversation across four dimensions (VideoSDK-aligned criteria).
+Score each from 0-10.
+
+REASONING: Does the agent explain its response logic clearly? Does it justify decisions,
+tool calls, or refusals? High scores = transparent reasoning; Low = unexplained actions.
+
+RELEVANCE: Does each agent response directly address what the caller asked or needed?
+High = on-topic, solves the user's goal; Low = off-topic, ignores user intent.
+
+CLARITY: Is the agent's spoken language clear and understandable for a voice call?
+No jargon, no overly complex sentences, appropriate for the language and accent.
+High = crystal clear for voice; Low = confusing or hard to follow.
+
+SCORE: Overall quality rating considering all dimensions above.
+
+Conversation:
+{transcript}
+
+User goal: {user_goal}
+Pass criteria: {pass_criteria}
+
+Respond with JSON:
+{
+  "reasoning": {"score": <0-10>, "explanation": <string>},
+  "relevance":  {"score": <0-10>, "explanation": <string>},
+  "clarity":    {"score": <0-10>, "explanation": <string>},
+  "score":      {"score": <0-10>, "explanation": <string>}
+}
 """
 
 _SPEECH_FIDELITY_PROMPT = """
@@ -127,6 +158,38 @@ class EvaAScorer:
                 entities.append(key)
         return entities
 
+    async def score_judge_criteria(
+        self,
+        turns: list[TurnResult],
+        test_case: TestCase,
+    ) -> list[JudgeScore]:
+        """
+        Score REASONING, RELEVANCE, CLARITY, SCORE (VideoSDK-aligned criteria).
+        Returns list of JudgeScore, each 0-10.
+        """
+        transcript = "\n".join(
+            f"User: {t.user_utterance}\nAgent: {t.agent_response}" for t in turns
+        )
+        prompt = _JUDGE_CRITERIA_PROMPT.format(
+            transcript=transcript,
+            user_goal=test_case.user_goal,
+            pass_criteria=test_case.pass_criteria,
+        )
+        result = await self._judge.judge("judge_criteria", prompt, {})
+        scores: list[JudgeScore] = []
+        for criterion in ("reasoning", "relevance", "clarity", "score"):
+            entry = result.get(criterion, {})
+            try:
+                raw_score = float(entry.get("score", 0.0))
+                scores.append(JudgeScore(
+                    criterion=JudgeCriterion(criterion),
+                    score=max(0.0, min(10.0, raw_score)),
+                    explanation=str(entry.get("explanation", "")),
+                ))
+            except Exception:
+                scores.append(JudgeScore(criterion=JudgeCriterion(criterion), score=0.0))
+        return scores
+
     async def compute(
         self,
         test_case: TestCase,
@@ -134,16 +197,36 @@ class EvaAScorer:
         actual_db_state: dict[str, Any],
         system_prompt: str = "",
         tool_results: list[dict[str, Any]] | None = None,
+        include_context: bool = False,
     ) -> EvaAScore:
         task_completion = self.score_task_completion(test_case.ground_truth_end_state, actual_db_state)
-        faithfulness, speech_fidelity = await asyncio.gather(
-            self.score_faithfulness(turns, test_case, system_prompt, tool_results),
-            self.score_speech_fidelity(turns, test_case),
-        )
+
+        if include_context:
+            faithfulness, speech_fidelity, judge_details = await asyncio.gather(
+                self.score_faithfulness(turns, test_case, system_prompt, tool_results),
+                self.score_speech_fidelity(turns, test_case),
+                self.score_judge_criteria(turns, test_case),
+            )
+            relevance = next((j.normalized for j in judge_details if j.criterion.value == "relevance"), 0.0)
+            reasoning = next((j.normalized for j in judge_details if j.criterion.value == "reasoning"), 0.0)
+            clarity = next((j.normalized for j in judge_details if j.criterion.value == "clarity"), 0.0)
+            overall = next((j.score for j in judge_details if j.criterion.value == "score"), 0.0)
+        else:
+            faithfulness, speech_fidelity = await asyncio.gather(
+                self.score_faithfulness(turns, test_case, system_prompt, tool_results),
+                self.score_speech_fidelity(turns, test_case),
+            )
+            judge_details, relevance, reasoning, clarity, overall = [], 0.0, 0.0, 0.0, 0.0
+
         return EvaAScore(
             task_completion=task_completion,
             faithfulness=faithfulness,
             speech_fidelity=speech_fidelity,
+            relevance=relevance,
+            reasoning=reasoning,
+            clarity=clarity,
+            judge_score_0_10=overall,
+            judge_details=judge_details,
         )
 
 

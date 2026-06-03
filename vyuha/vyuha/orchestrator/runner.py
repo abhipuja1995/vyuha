@@ -34,6 +34,7 @@ async def execute_single_run(
     mode: str = "text",
     vaut_url: str | None = None,
     seed: int | None = None,
+    include_context: bool = False,
 ) -> RunResult:
     """
     Core run execution: simulator → scoring → RCA tagging → RunResult.
@@ -74,10 +75,21 @@ async def execute_single_run(
     p50 = latencies[len(latencies) // 2] if latencies else 0.0
     p95 = latencies[int(len(latencies) * 0.95)] if latencies else 0.0
 
-    diagnostics = DiagnosticMetrics(latency_p50_ms=p50, latency_p95_ms=p95, tool_call_success_rate=1.0)
+    def _avg(vals: list[float]) -> float:
+        return sum(vals) / len(vals) if vals else 0.0
+
+    diagnostics = DiagnosticMetrics(
+        latency_p50_ms=p50,
+        latency_p95_ms=p95,
+        avg_stt_latency_ms=_avg([t.component_latency.stt_latency_ms for t in turns]),
+        avg_llm_latency_ms=_avg([t.component_latency.llm_latency_ms for t in turns]),
+        avg_tts_latency_ms=_avg([t.component_latency.tts_latency_ms for t in turns]),
+        avg_end_to_end_latency_ms=_avg([t.component_latency.end_to_end_latency_ms for t in turns]),
+        tool_call_success_rate=1.0,
+    )
 
     eva_a, eva_x = await asyncio.gather(
-        _eva_a.compute(test_case, turns, actual_db_state),  # type: ignore[union-attr]
+        _eva_a.compute(test_case, turns, actual_db_state, include_context=include_context),  # type: ignore[union-attr]
         _eva_x.compute(test_case, turns),
     )
 
