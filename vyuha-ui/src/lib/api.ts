@@ -97,6 +97,9 @@ export interface IngestResult {
   failure_signals?: string[];
   confidence?: number;
   persona?: Record<string, unknown>;
+  test_case?: TestCase;
+  saved?: boolean;
+  stt?: string;
 }
 
 export interface Summary {
