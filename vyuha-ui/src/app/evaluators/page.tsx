@@ -1,11 +1,11 @@
 "use client";
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import {
   FlaskConical, Play, ChevronDown, ChevronUp, Plus, Trash2,
-  CheckCircle, XCircle, AlertCircle, Loader2, BarChart3,
+  CheckCircle, XCircle, AlertCircle, Loader2, BarChart3, Mic, FileAudio,
 } from "lucide-react";
 import { clsx } from "clsx";
 
@@ -252,6 +252,188 @@ function ExperimentBuilder() {
   );
 }
 
+// ── Audio Test ────────────────────────────────────────────────────────────────
+
+interface TranscriptTurn { role: string; text: string }
+
+function AudioTestTab({ evaluators }: { evaluators: EvaluatorMeta[] }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [lang, setLang] = useState("en-IN");
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [expected, setExpected] = useState("");
+  const [selectedEvals, setSelectedEvals] = useState<string[]>(["word_error_rate", "contains_any"]);
+  const [evalConfig, setEvalConfig] = useState<Record<string, string>>({ contains_any: '{"keywords":["balance","account","sorry"]}' });
+  const [scores, setScores] = useState<Record<string, any>>({});
+
+  const transcribeMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) throw new Error("Select a file");
+      const fd = new FormData();
+      fd.append("audio_file", file);
+      fd.append("language", lang);
+      const res = await fetch("/api/proxy/ingest/transcribe", { method: "POST", body: fd });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("json")) throw new Error(await res.text());
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail ?? "Transcription failed");
+      return d as { transcript: TranscriptTurn[]; turns: number };
+    },
+    onSuccess: (d) => setTranscript(d.transcript),
+  });
+
+  const evaluateMutation = useMutation({
+    mutationFn: async () => {
+      const agentText = transcript.filter((t) => t.role === "agent").map((t) => t.text).join(" ");
+      const userText = transcript.filter((t) => t.role === "user").map((t) => t.text).join(" ");
+      const fullText = transcript.map((t) => `${t.role.toUpperCase()}: ${t.text}`).join("\n");
+
+      const results: Record<string, any> = {};
+      for (const evalName of selectedEvals) {
+        try {
+          const config = evalConfig[evalName] ? JSON.parse(evalConfig[evalName]) : {};
+          const inputs: Record<string, string> = { output: agentText };
+          if (expected) inputs["expected"] = expected;
+          if (evalName === "word_error_rate" || evalName === "character_error_rate") {
+            inputs["output"] = agentText;
+            inputs["expected"] = expected || agentText;
+          }
+          const r = await apiFetch<any>("/evaluators/run", {
+            method: "POST",
+            body: JSON.stringify({ evaluator: evalName, inputs, config }),
+          });
+          results[evalName] = r;
+        } catch (e) {
+          results[evalName] = { error: String(e) };
+        }
+      }
+      return results;
+    },
+    onSuccess: setScores,
+  });
+
+  const toggleEval = (name: string) =>
+    setSelectedEvals((prev) => prev.includes(name) ? prev.filter((e) => e !== name) : [...prev, name]);
+
+  return (
+    <div className="space-y-5">
+      {/* Step 1: Upload */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded-full bg-brand-600 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">1</div>
+          <h3 className="font-medium text-sm">Upload call recording</h3>
+        </div>
+        <button onClick={() => fileRef.current?.click()}
+          className={`w-full border-2 border-dashed rounded-xl p-6 text-center transition-colors ${file ? "border-brand-400 bg-brand-50" : "border-gray-200 bg-gray-50 hover:border-gray-300"}`}>
+          <FileAudio className={`w-7 h-7 mx-auto mb-2 ${file ? "text-brand-500" : "text-gray-300"}`} />
+          {file
+            ? <p className="text-sm font-medium text-brand-700">{file.name} — {(file.size / 1024).toFixed(1)} KB</p>
+            : <p className="text-sm text-gray-500">Click to select call recording (WAV · MP3 · OGG · FLAC · M4A)</p>}
+        </button>
+        <input ref={fileRef} type="file" accept=".wav,.mp3,.ogg,.flac,.m4a" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); setTranscript([]); setScores({}); } }} />
+        <div className="flex gap-3">
+          <select value={lang} onChange={(e) => setLang(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg px-3 py-2">
+            {[["en-IN","English (Indian)"],["hi","Hindi"],["te","Telugu"],["ta","Tamil"],["or","Odia"],["kn","Kannada"],["ml","Malayalam"],["mr","Marathi"],["bn","Bengali"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <button onClick={() => transcribeMutation.mutate()} disabled={!file || transcribeMutation.isPending}
+            className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg">
+            {transcribeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
+            Transcribe
+          </button>
+        </div>
+        {transcribeMutation.isError && <p className="text-xs text-red-600">{(transcribeMutation.error as Error).message}</p>}
+      </div>
+
+      {/* Step 2: Transcript */}
+      {transcript.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-brand-600 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">2</div>
+            <h3 className="font-medium text-sm">Transcript ({transcript.length} turns)</h3>
+          </div>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {transcript.map((t, i) => (
+              <div key={i} className={`flex gap-3 text-sm ${t.role === "agent" ? "justify-start" : "justify-end"}`}>
+                <div className={`rounded-xl px-3 py-2 max-w-xs ${t.role === "agent" ? "bg-gray-100 text-gray-800" : "bg-brand-600 text-white"}`}>
+                  <p className="text-xs opacity-60 mb-0.5 capitalize">{t.role}</p>
+                  <p>{t.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600 mb-1 block">Expected transcript (for WER/CER comparison)</label>
+            <textarea value={expected} onChange={(e) => setExpected(e.target.value)} rows={2} placeholder="Paste expected agent responses here…"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none" />
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Evaluators */}
+      {transcript.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-brand-600 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">3</div>
+            <h3 className="font-medium text-sm">Select evaluators</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {["word_error_rate","character_error_rate","rouge_score","f1_score","contains_any","contains_none","is_refusal","regex_pii_detection","levenshtein_similarity"].map((name) => (
+              <button key={name} onClick={() => toggleEval(name)}
+                className={clsx("text-xs px-3 py-1.5 rounded-full border transition-colors font-medium",
+                  selectedEvals.includes(name) ? "bg-brand-600 text-white border-brand-600" : "border-gray-200 text-gray-600 hover:border-brand-300")}>
+                {name}
+              </button>
+            ))}
+          </div>
+          {selectedEvals.filter(n => ["contains_any","contains_none","regex"].includes(n.split("_")[0])).map((name) => (
+            <div key={name}>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">{name} config (JSON)</label>
+              <input value={evalConfig[name] ?? "{}"} onChange={(e) => setEvalConfig({ ...evalConfig, [name]: e.target.value })}
+                className="w-full text-xs font-mono border border-gray-200 rounded-lg px-3 py-2" />
+            </div>
+          ))}
+          <button onClick={() => evaluateMutation.mutate()} disabled={selectedEvals.length === 0 || evaluateMutation.isPending}
+            className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg">
+            {evaluateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            Run evaluators
+          </button>
+        </div>
+      )}
+
+      {/* Step 4: Scores */}
+      {Object.keys(scores).length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-green-600 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">✓</div>
+            <h3 className="font-medium text-sm">Results</h3>
+          </div>
+          {Object.entries(scores).map(([name, result]: [string, any]) => (
+            <div key={name} className={clsx("rounded-xl border p-3",
+              result.error ? "bg-red-50 border-red-200"
+              : result.passed === true ? "bg-green-50 border-green-200"
+              : result.passed === false ? "bg-red-50 border-red-200"
+              : "bg-gray-50 border-gray-200")}>
+              <div className="flex items-center gap-2">
+                {result.error ? <XCircle className="w-4 h-4 text-red-500" />
+                : result.passed === true ? <CheckCircle className="w-4 h-4 text-green-500" />
+                : result.passed === false ? <XCircle className="w-4 h-4 text-red-500" />
+                : <AlertCircle className="w-4 h-4 text-gray-400" />}
+                <span className="font-mono text-xs text-gray-600">{name}</span>
+                {!result.error && (
+                  <code className="ml-auto font-semibold text-sm text-brand-700">{String(result.value)}</code>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1 ml-6">{result.error ?? result.reason}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function EvaluatorsPage() {
@@ -260,7 +442,7 @@ export default function EvaluatorsPage() {
     queryFn: () => apiFetch<EvaluatorMeta[]>("/evaluators"),
   });
 
-  const [activeTab, setActiveTab] = useState<"playground" | "experiment" | "library">("playground");
+  const [activeTab, setActiveTab] = useState<"audio" | "playground" | "experiment" | "library">("audio");
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -272,14 +454,20 @@ export default function EvaluatorsPage() {
       </div>
 
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {(["playground", "experiment", "library"] as const).map((t) => (
-          <button key={t} onClick={() => setActiveTab(t)}
-            className={clsx("px-4 py-1.5 text-sm font-medium rounded-lg capitalize", activeTab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}>
-            {t}
+        {([
+          { id: "audio", label: "Audio Test" },
+          { id: "playground", label: "Playground" },
+          { id: "experiment", label: "Experiment" },
+          { id: "library", label: "Library" },
+        ] as const).map(({ id, label }) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={clsx("px-4 py-1.5 text-sm font-medium rounded-lg", activeTab === id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}>
+            {label}
           </button>
         ))}
       </div>
 
+      {activeTab === "audio" && <AudioTestTab evaluators={evaluators} />}
       {activeTab === "playground" && <EvalPlayground evaluators={evaluators} />}
       {activeTab === "experiment" && <ExperimentBuilder />}
       {activeTab === "library" && (
