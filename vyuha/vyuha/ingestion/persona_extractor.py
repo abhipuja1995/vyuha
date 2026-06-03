@@ -63,12 +63,8 @@ class PersonaExtractor:
         return llm_persona
 
     async def _extract_from_transcript(self, record: FailedCallRecord) -> ExtractedPersona:
-        import anthropic
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-
         transcript_text = "\n".join(
-            f"{t['role'].upper()}: {t['text']}"
-            for t in record.transcript
+            f"{t['role'].upper()}: {t['text']}" for t in record.transcript
         )
         duration = (record.ended_at - record.started_at).total_seconds()
         final_sentiment = record.sentiment_scores[-1] if record.sentiment_scores else 0.5
@@ -79,20 +75,46 @@ class PersonaExtractor:
             duration_seconds=int(duration),
             final_sentiment=final_sentiment,
         )
+        system = "You are an expert in Indian language identification and call center analytics. Respond with valid JSON only."
 
-        resp = await client.messages.create(
-            model=settings.default_judge_model,
-            max_tokens=512,
-            system="You are an expert in Indian language identification and call center analytics. Respond with valid JSON only.",
-            messages=[{"role": "user", "content": prompt}],
-        )
+        data: dict[str, Any] = {}
+        # Try Anthropic → local Ollama → rule-based fallback
+        if settings.anthropic_api_key:
+            try:
+                import anthropic
+                from vyuha.utils.llm import parse_llm_json
+                client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+                resp = await client.messages.create(
+                    model=settings.default_judge_model,
+                    max_tokens=512,
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                data = parse_llm_json(resp.content[0].text)
+            except Exception as exc:
+                log.warning("persona_anthropic_failed", call_id=record.call_id, error=str(exc))
 
-        raw = resp.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        data = json.loads(raw)
+        if not data and settings.local_llm_url:
+            try:
+                from openai import AsyncOpenAI
+                from vyuha.utils.llm import parse_llm_json
+                client_oai = AsyncOpenAI(api_key="ollama", base_url=settings.local_llm_url)
+                resp_oai = await client_oai.chat.completions.create(
+                    model=settings.local_llm_model,
+                    max_tokens=512,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+                data = parse_llm_json(resp_oai.choices[0].message.content or "{}")
+                log.info("persona_extracted_via_local_llm", call_id=record.call_id)
+            except Exception as exc:
+                log.warning("persona_local_llm_failed", call_id=record.call_id, error=str(exc))
+
+        if not data:
+            log.info("persona_rule_based_fallback", call_id=record.call_id)
+            data = self._rule_based_persona(record)
 
         emotion = data.get("emotion", "neutral")
         if final_sentiment < 0.25:
@@ -110,6 +132,39 @@ class PersonaExtractor:
             code_switch_detected=bool(data.get("code_switch_detected", False)),
             secondary_language=data.get("secondary_language"),
         )
+
+    def _rule_based_persona(self, record: FailedCallRecord) -> dict[str, Any]:
+        """
+        Deterministic persona extraction — used when no LLM is available.
+        Derives emotion from sentiment scores, noise from call metadata.
+        """
+        final_sentiment = record.sentiment_scores[-1] if record.sentiment_scores else 0.5
+        emotion = "neutral"
+        if final_sentiment < 0.25:
+            emotion = "distressed"
+        elif final_sentiment < 0.4:
+            emotion = "frustrated"
+        elif final_sentiment < 0.55:
+            emotion = "anxious"
+
+        # Detect code-switching heuristically: look for mixed scripts in transcript
+        has_latin = has_indic = False
+        for turn in record.transcript:
+            text = turn.get("text", "")
+            if any(ord(c) < 128 and c.isalpha() for c in text):
+                has_latin = True
+            if any(0x0900 <= ord(c) <= 0x0DFF for c in text):
+                has_indic = True
+
+        return {
+            "accent_variant": "",
+            "speaking_rate": 1.0,
+            "emotion": emotion,
+            "code_switch_detected": has_latin and has_indic,
+            "secondary_language": "en-IN" if (has_latin and has_indic) else None,
+            "noise_profile": "quiet_indoor",
+            "estimated_snr_db": None,
+        }
 
     def _analyze_audio(self, audio_path: str) -> dict[str, Any]:
         """

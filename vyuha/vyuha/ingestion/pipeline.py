@@ -62,11 +62,40 @@ Return JSON:
 class IngestionPipeline:
     """
     Converts failed production calls into repeatable regression test cases.
+    Uses Anthropic → local Ollama → error, in that priority order.
     """
 
     def __init__(self) -> None:
         self._persona_extractor = PersonaExtractor()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+    async def _llm_generate(self, prompt: str, system: str) -> str:
+        """Call Anthropic or local Ollama, whichever is configured."""
+        if settings.anthropic_api_key:
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            resp = await client.messages.create(
+                model=settings.default_judge_model,
+                max_tokens=2048,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.content[0].text
+
+        if settings.local_llm_url:
+            from openai import AsyncOpenAI
+            client_oai = AsyncOpenAI(api_key="ollama", base_url=settings.local_llm_url)
+            resp_oai = await client_oai.chat.completions.create(
+                model=settings.local_llm_model,
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return resp_oai.choices[0].message.content or "{}"
+
+        raise RuntimeError(
+            "No LLM configured. Set ANTHROPIC_API_KEY or LOCAL_LLM_URL in .env."
+        )
 
     async def ingest(self, record: FailedCallRecord) -> tuple[IngestionResult, TestCase] | None:
         """
@@ -107,14 +136,9 @@ class IngestionPipeline:
             signals=[s.value for s in signals],
         )
 
-        resp = await self._client.messages.create(
-            model=settings.default_judge_model,
-            max_tokens=2048,
-            system="You are a QA expert. Respond with valid JSON only.",
-            messages=[{"role": "user", "content": prompt}],
-        )
         from vyuha.utils.llm import parse_llm_json
-        data = parse_llm_json(resp.content[0].text)
+        raw = await self._llm_generate(prompt, "You are a QA expert. Respond with valid JSON only.")
+        data = parse_llm_json(raw)
 
         try:
             lang = Language(persona_data.language)

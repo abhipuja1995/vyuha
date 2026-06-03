@@ -14,6 +14,22 @@ import {
 import Link from "next/link";
 
 
+// ─── Safe fetch helper ────────────────────────────────────────────────────────
+
+async function safeFetch(url: string, init?: RequestInit): Promise<IngestResult> {
+  const res = await fetch(url, init);
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.detail ?? data?.message ?? `HTTP ${res.status}`);
+  }
+  return data as IngestResult;
+}
+
 // ─── Progress steps ───────────────────────────────────────────────────────────
 
 const STEPS = [
@@ -362,13 +378,11 @@ function JsonIngestTab() {
       setStep("persona");
       await new Promise((r) => setTimeout(r, 300));
       setStep("generate");
-      const res = await fetch("/api/proxy/ingest/call/preview", {
+      const data = await safeFetch("/api/proxy/ingest/call/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? "Ingestion failed");
       setStep("preview");
       setPreview(data);
     } catch (e: any) {
@@ -469,9 +483,7 @@ function UploadTab() {
       const fd = new FormData();
       fd.append("audio_file", file);
       fd.append("language", form.language_detected);
-      const res = await fetch("/api/proxy/ingest/transcribe", { method: "POST", body: fd });
-      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
-      return res.json() as Promise<{ transcript: Array<{ role: string; text: string }>; turns: number }>;
+      return safeFetch("/api/proxy/ingest/transcribe", { method: "POST", body: fd }) as unknown as Promise<{ transcript: Array<{ role: string; text: string }>; turns: number }>;
     },
     onSuccess: ({ transcript }) =>
       setForm((f) => ({ ...f, transcript: JSON.stringify(transcript, null, 2) })),
@@ -499,9 +511,7 @@ function UploadTab() {
 
       // Long step — actual API call
       setStep("signals");
-      const res = await fetch("/api/proxy/ingest/upload/preview", { method: "POST", body: fd });
-      const data: PreviewResult = await res.json();
-      if (!res.ok) throw new Error((data as any).detail ?? "Upload failed");
+      const data = await safeFetch("/api/proxy/ingest/upload/preview", { method: "POST", body: fd });
 
       if (!data.ingested) {
         setStep(null);
