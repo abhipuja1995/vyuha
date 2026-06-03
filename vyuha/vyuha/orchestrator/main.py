@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from vyuha.config import settings
 from vyuha.orchestrator.routes import test_cases, runs, reports, generate, ingest, audio, eval as eval_route
 from vyuha.orchestrator.routes import settings as settings_route
+from vyuha.orchestrator.routes import evaluators as evaluators_route
+from vyuha.orchestrator.routes import workflows as workflows_route
 
 log = structlog.get_logger()
 
@@ -74,6 +76,8 @@ app.include_router(generate.router, prefix="/generate", tags=["Generation"])
 app.include_router(ingest.router, prefix="/ingest", tags=["Ingestion"])
 app.include_router(audio.router, prefix="/test-cases", tags=["Audio"])
 app.include_router(eval_route.router, prefix="/eval", tags=["Evaluation"])
+app.include_router(evaluators_route.router, prefix="/evaluators", tags=["Evaluators"])
+app.include_router(workflows_route.router, prefix="/workflows", tags=["Workflows"])
 app.include_router(settings_route.router, prefix="/settings/providers", tags=["Settings"])
 
 

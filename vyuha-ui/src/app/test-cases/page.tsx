@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, TestCase, TestCategory, Language } from "@/lib/api";
-import { Plus, Play, Trash2, ChevronRight } from "lucide-react";
+import { Plus, Play, Trash2, ChevronRight, GitBranch } from "lucide-react";
 import Link from "next/link";
 import { clsx } from "clsx";
 
@@ -51,9 +51,14 @@ export default function TestCasesPage() {
           <h1 className="text-2xl font-bold">Test Cases</h1>
           <p className="text-sm text-gray-500 mt-0.5">{cases.length} cases in library</p>
         </div>
-        <Link href="/test-cases/new" className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-          <Plus className="w-4 h-4" /> New Test Case
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/workflows" className="flex items-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+            <GitBranch className="w-4 h-4" /> Import Workflow
+          </Link>
+          <Link href="/test-cases/new" className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+            <Plus className="w-4 h-4" /> New Test Case
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
