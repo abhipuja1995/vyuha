@@ -156,6 +156,12 @@ export interface ProviderConfig {
   ollama_llm_model?: string;
 }
 
+export interface ActiveLLM {
+  provider: string;     // e.g. "claude/claude-sonnet-4-6" or "ollama/llama3.2"
+  configured: boolean;
+  label: string;
+}
+
 export const api = {
   testCases: {
     list: (params?: { category?: TestCategory; language?: Language; tag?: string }) =>

@@ -38,8 +38,12 @@ _experiments: dict[str, dict[str, Any]] = {}
 
 class EvalRunRequest(BaseModel):
     evaluator: str                          # e.g. "rouge_score", "contains_any"
-    inputs: dict[str, Any]                  # e.g. {"output": "...", "expected": "..."}
-    config: dict[str, Any] = {}             # constructor kwargs, e.g. {"k": 3}
+    inputs: dict[str, Any] = {}            # e.g. {"output": "...", "expected": "..."}
+    config: dict[str, Any] = {}            # constructor kwargs, e.g. {"k": 3}
+    # LLM step — if set, system calls LLM(user_input) → output, then evaluates
+    user_input: str | None = None          # if provided, LLM generates output first
+    system_prompt: str = ""               # optional system prompt for LLM call
+    expected: str | None = None           # expected output for comparison
 
 
 class EvalBatchRequest(BaseModel):
@@ -47,6 +51,8 @@ class EvalBatchRequest(BaseModel):
     rows: list[dict[str, Any]]              # each row = inputs dict
     config: dict[str, Any] = {}
     max_parallel: int = 8
+    # LLM step for each row
+    system_prompt: str = ""               # applied to all rows if user_input key present
 
 
 class ExperimentRequest(BaseModel):
@@ -64,29 +70,87 @@ async def list_evaluators() -> list[dict[str, Any]]:
     return EvalRegistry.list_all()
 
 
+@router.get("/active-llm")
+async def get_active_llm() -> dict[str, Any]:
+    """Return the best currently configured LLM provider."""
+    from vyuha.utils.llm_router import active_provider
+    p = active_provider()
+    return {"provider": p, "configured": p != "none"}
+
+
 @router.post("/run")
 async def run_evaluator(req: EvalRunRequest) -> dict[str, Any]:
-    """Run a single evaluator on one input row."""
+    """
+    Run a single evaluator.
+    If user_input is provided, the best available LLM generates output first,
+    then the evaluator scores it against expected. This is the correct flow:
+      user_input → [LLM] → output → [evaluator] → score
+    """
     cls = EvalRegistry.get(req.evaluator)
     if cls is None:
         raise HTTPException(404, f"Unknown evaluator '{req.evaluator}'. GET /evaluators for list.")
+
+    inputs = dict(req.inputs)
+    llm_output: str | None = None
+    provider_used: str | None = None
+
+    # LLM step: if user_input given, generate output first
+    if req.user_input:
+        try:
+            from vyuha.utils.llm_router import call as llm_call, active_provider
+            llm_resp = await llm_call(req.user_input, system=req.system_prompt)
+            llm_output = llm_resp.text
+            provider_used = llm_resp.provider
+            inputs["output"] = llm_output
+            if req.expected is not None:
+                inputs["expected"] = req.expected
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc))
+
     try:
         instance = cls(**req.config) if req.config else cls()
-        result = instance.run(**req.inputs)
-        return {"evaluator": req.evaluator, **result.to_dict()}
+        result = instance.run(**inputs)
+        response = {"evaluator": req.evaluator, **result.to_dict()}
+        if llm_output is not None:
+            response["llm_output"] = llm_output
+            response["llm_provider"] = provider_used
+            response["user_input"] = req.user_input
+        return response
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
 
 @router.post("/run/batch")
 async def run_evaluator_batch(req: EvalBatchRequest) -> dict[str, Any]:
-    """Run an evaluator over a list of rows in parallel."""
+    """
+    Run an evaluator over a list of rows.
+    If a row has 'user_input', LLM generates output first then evaluates.
+    """
     cls = EvalRegistry.get(req.evaluator)
     if cls is None:
         raise HTTPException(404, f"Unknown evaluator '{req.evaluator}'.")
+
+    # LLM step for rows that have user_input
+    rows = list(req.rows)
+    provider_used: str | None = None
+    rows_with_llm = [i for i, r in enumerate(rows) if "user_input" in r]
+    if rows_with_llm:
+        try:
+            from vyuha.utils.llm_router import call as llm_call
+            import asyncio
+            async def _gen(row):
+                resp = await llm_call(row["user_input"], system=req.system_prompt)
+                return resp.text, resp.provider
+            outputs = await asyncio.gather(*[_gen(rows[i]) for i in rows_with_llm])
+            for idx, (text, prov) in zip(rows_with_llm, outputs):
+                rows[idx] = {**rows[idx], "output": text}
+                provider_used = prov
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc))
+
     try:
         instance = cls(**req.config) if req.config else cls()
-        results = instance.run_batch(req.rows, max_parallel=req.max_parallel)
+        results = instance.run_batch(rows, max_parallel=req.max_parallel)
         rows_out = [r.to_dict() for r in results]
         values = [r.value for r in results if isinstance(r.value, (int, float))]
         passed = sum(1 for r in results if r.passed is True)
@@ -96,6 +160,7 @@ async def run_evaluator_batch(req: EvalBatchRequest) -> dict[str, Any]:
             "passed": passed,
             "failed": len([r for r in results if r.passed is False]),
             "avg_value": round(sum(values) / len(values), 4) if values else None,
+            **({"llm_provider": provider_used} if provider_used else {}),
             "results": rows_out,
         }
     except Exception as exc:

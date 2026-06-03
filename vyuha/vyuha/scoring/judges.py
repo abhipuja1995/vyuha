@@ -71,13 +71,21 @@ class LLMJudge:
         context: dict[str, Any],
         system: str = "",
     ) -> dict[str, Any]:
-        model = _JUDGE_CONFIG.get(metric, settings.default_judge_model)
+        """Route to best available LLM automatically."""
+        from vyuha.utils import llm_router
+        full_prompt = f"{prompt}\n\nContext:\n{json.dumps(context, indent=2)}"
         try:
-            return await self._call_model(model, prompt, context, system)
+            resp = await llm_router.call(full_prompt, system=system or "You are a precise evaluator. Always respond with valid JSON.")
+            log.debug("judge_used", metric=metric, provider=resp.provider, model=resp.model)
+            from vyuha.utils.llm import parse_llm_json
+            try:
+                return parse_llm_json(resp.text)
+            except json.JSONDecodeError:
+                log.error("judge_json_parse_failed", provider=resp.provider, raw=resp.text[:200])
+                return {"score": 0.0, "reason": "Parse error", "raw": resp.text}
         except Exception as exc:
-            log.warning("judge_primary_failed", model=model, metric=metric, error=str(exc))
-            fallback = settings.fallback_judge_model
-            return await self._call_model(fallback, prompt, context, system)
+            log.error("judge_all_llm_failed", metric=metric, error=str(exc))
+            return {"score": 0.0, "reason": f"LLM unavailable: {exc}"}
 
     async def _call_model(
         self, model: str, prompt: str, context: dict[str, Any], system: str

@@ -84,3 +84,17 @@ app.include_router(settings_route.router, prefix="/settings/providers", tags=["S
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "vyuha"}
+
+
+@app.get("/api/active-llm")
+async def active_llm() -> dict:
+    """Return the best currently-configured LLM provider for UI display."""
+    from vyuha.utils.llm_router import active_provider
+    provider = active_provider()
+    return {
+        "provider": provider,
+        "configured": provider != "none",
+        "label": {
+            "none": "No LLM configured",
+        }.get(provider, f"Powered by {provider}"),
+    }

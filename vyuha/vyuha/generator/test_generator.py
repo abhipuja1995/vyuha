@@ -4,10 +4,10 @@ import json
 import uuid
 from typing import Any
 
-import anthropic
 import structlog
 
 from vyuha.config import settings
+from vyuha.utils import llm_router
 from vyuha.models.test_case import (
     TestCase, TestCategory, PersonaConfig, Language, Emotion, NoiseProfile,
     ConversationGraph, ConversationNode, ConversationEdge, ToolCallSpec,
@@ -70,14 +70,10 @@ Return JSON: {{"test_cases": [<array of test cases>]}}
 
 class TestCaseGenerator:
     """
-    Generates test cases from agent configuration artefacts (system prompt, KB, tools, flow).
-    Uses Claude Sonnet 4.6 to produce REQ-GEN-01 compliant coverage:
-    - Minimum 50 distinct scenarios from any prompt > 500 tokens
-    - 30% Happy Path, 40% Edge Case, 30% Failure Mode
+    Generates test cases from agent configuration artefacts.
+    Uses the best available LLM (auto-routed: Claude → GPT-4o → Ollama).
+    Distribution: 30% Happy Path, 40% Edge Case, 30% Failure Mode.
     """
-
-    def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def generate(
         self,
@@ -109,21 +105,20 @@ class TestCaseGenerator:
             use_cases=use_cases or "General customer support",
         )
 
-        log.info("generating_test_cases", count=count, language=language)
+        provider = llm_router.active_provider()
+        log.info("generating_test_cases", count=count, language=language, provider=provider)
 
-        response = await self._client.messages.create(
-            model=settings.default_judge_model,
-            max_tokens=8192,
-            system=_GENERATION_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = response.content[0].text
         try:
-            from vyuha.utils.llm import parse_llm_json
-            data = parse_llm_json(raw)
+            llm_resp = await llm_router.call(prompt, system=_GENERATION_SYSTEM, max_tokens=8192)
+        except RuntimeError as exc:
+            log.error("test_generator_no_llm", error=str(exc))
+            raise
+
+        from vyuha.utils.llm import parse_llm_json
+        try:
+            data = parse_llm_json(llm_resp.text)
         except json.JSONDecodeError:
-            log.error("test_generator_json_parse_failed", raw=raw[:300])
+            log.error("test_generator_json_parse_failed", raw=llm_resp.text[:300])
             return []
 
         test_cases = []
