@@ -39,10 +39,26 @@ async def regression_delta(
     from vyuha.models.scoring import Verdict
 
     async def fetch_results_by_tag(tag: str) -> dict[str, str]:
-        q = (
-            select(RunRow.test_case_id, RunRow.verdict)
+        """Return latest verdict per test case for the given tag."""
+        from sqlalchemy import func as _func
+        # Subquery: latest started_at per test_case_id
+        latest_sub = (
+            select(
+                RunRow.test_case_id,
+                _func.max(RunRow.started_at).label("max_started"),
+            )
             .join(TestCaseRow, RunRow.test_case_id == TestCaseRow.id)
             .where(TestCaseRow.tags.contains([tag]))
+            .group_by(RunRow.test_case_id)
+            .subquery()
+        )
+        q = (
+            select(RunRow.test_case_id, RunRow.verdict)
+            .join(
+                latest_sub,
+                (RunRow.test_case_id == latest_sub.c.test_case_id)
+                & (RunRow.started_at == latest_sub.c.max_started),
+            )
         )
         result = await db.execute(q)
         return {row.test_case_id: row.verdict for row in result}

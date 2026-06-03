@@ -114,8 +114,12 @@ class PassKResult(BaseModel):
 
     @property
     def mean_eva_a(self) -> float:
+        if not self.runs:
+            return 0.0
         return sum(r.eva_a.composite for r in self.runs) / len(self.runs)
 
     @property
     def mean_eva_x(self) -> float:
+        if not self.runs:
+            return 0.0
         return sum(r.eva_x.composite for r in self.runs) / len(self.runs)

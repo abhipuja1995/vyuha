@@ -10,7 +10,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-API_BASE = "http://localhost:8000"
+import os
+API_BASE = os.getenv("VYUHA_API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Vyuha — Voice AI Eval", layout="wide", page_icon="🎙️")
 

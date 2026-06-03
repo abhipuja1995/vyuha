@@ -67,3 +67,13 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "anyio>=4.13.0",
+    "jiwer>=4.0.0",
+    "numpy>=2.4.6",
+    "pandas>=3.0.3",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]

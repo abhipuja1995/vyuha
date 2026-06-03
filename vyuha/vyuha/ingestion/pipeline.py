@@ -68,7 +68,7 @@ class IngestionPipeline:
         self._persona_extractor = PersonaExtractor()
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    async def ingest(self, record: FailedCallRecord) -> IngestionResult | None:
+    async def ingest(self, record: FailedCallRecord) -> tuple[IngestionResult, TestCase] | None:
         """
         Returns None if the call does not have enough failure signals to warrant a test case.
         """
@@ -113,12 +113,8 @@ class IngestionPipeline:
             system="You are a QA expert. Respond with valid JSON only.",
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = resp.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        data = json.loads(raw)
+        from vyuha.utils.llm import parse_llm_json
+        data = parse_llm_json(resp.content[0].text)
 
         try:
             lang = Language(persona_data.language)

@@ -213,17 +213,20 @@ class RunRepo:
         return {"total_failure_tags": total, "breakdown": breakdown}
 
     async def count_critical_failures(self) -> int:
-        q = select(func.count()).select_from(RunRow).where(RunRow.failure_report.is_not(None))
+        """Count runs with a SAFETY_VIOLATION (RCA-SAFE-01) tag using a JSONB containment query."""
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+        q = (
+            select(func.count())
+            .select_from(RunRow)
+            .where(
+                RunRow.failure_report.op("@>")(
+                    cast({"rca_tags": [{"code": "RCA-SAFE-01"}]}, JSONB)
+                )
+            )
+        )
         result = await self.db.execute(q)
-        # Count rows where any rca_tag has code == RCA-SAFE-01
-        # For simplicity at Phase 2, query and filter in Python
-        all_q = select(RunRow.failure_report).where(RunRow.failure_report.is_not(None))
-        all_result = await self.db.execute(all_q)
-        count = 0
-        for (report,) in all_result:
-            if any(t.get("code") == "RCA-SAFE-01" for t in (report or {}).get("rca_tags", [])):
-                count += 1
-        return count
+        return result.scalar_one() or 0
 
 
 def _row_to_run_result(row: RunRow) -> RunResult:

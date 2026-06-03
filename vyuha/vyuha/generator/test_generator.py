@@ -120,15 +120,11 @@ class TestCaseGenerator:
 
         raw = response.content[0].text
         try:
-            data = json.loads(raw)
+            from vyuha.utils.llm import parse_llm_json
+            data = parse_llm_json(raw)
         except json.JSONDecodeError:
-            # Try stripping markdown
-            clean = raw
-            if "```" in clean:
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-            data = json.loads(clean)
+            log.error("test_generator_json_parse_failed", raw=raw[:300])
+            return []
 
         test_cases = []
         for tc_data in data.get("test_cases", []):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from enum import Enum
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -99,7 +99,7 @@ class ToolCallSpec(BaseModel):
 
 
 class TestCase(BaseModel):
-    test_id: str = Field(default_factory=lambda: f"TC-{uuid.uuid4().hex[:8].upper()}")
+    test_id: str = Field(default_factory=lambda: f"TC-{uuid.uuid4().hex[:12].upper()}")
     title: str
     category: TestCategory
     user_goal: str
@@ -111,7 +111,7 @@ class TestCase(BaseModel):
     created_by: str = "AUTO_GENERATED"
     tags: list[str] = Field(default_factory=list)
     linked_production_call: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = 1
 
     @property

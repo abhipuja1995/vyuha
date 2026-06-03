@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -77,7 +77,7 @@ async def twilio_webhook(request: Request, db: DbDep) -> dict[str, Any]:
     if call_status not in ("no-answer", "busy", "failed", "canceled"):
         return {"ingested": False, "reason": f"Call status '{call_status}' is not a failure"}
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     record = FailedCallRecord(
         call_id=call_sid,
         agent_id=str(form.get("To", "unknown")),
@@ -205,7 +205,7 @@ async def upload_call_recording(
             log.warning("ollama_stt_auto_transcribe_failed", call_id=effective_call_id, error=stt_error)
 
     # Build record
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     pre_signals = [] if transcript else [FailureSignal.ABANDONMENT]
     record = FailedCallRecord(
         call_id=effective_call_id,

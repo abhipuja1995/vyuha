@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+import functools
+
 import structlog
 
 from vyuha.config import settings
@@ -20,9 +22,11 @@ from vyuha.scoring import EvaAScorer, EvaXScorer, RCATagger
 
 log = structlog.get_logger()
 
-_eva_a = EvaAScorer()
-_eva_x = EvaXScorer()
-_rca = RCATagger()
+
+@functools.lru_cache(maxsize=1)
+def _get_scorers() -> tuple[EvaAScorer, EvaXScorer, RCATagger]:
+    """Lazily initialize scorers on first use so API keys are validated at runtime."""
+    return EvaAScorer(), EvaXScorer(), RCATagger()
 
 
 async def execute_single_run(
@@ -40,6 +44,7 @@ async def execute_single_run(
     run_id = str(uuid.uuid4())
     started_at = datetime.utcnow()
 
+    _eva_a, _eva_x, _rca = _get_scorers()
     simulator = UserSimulator(vaut_url=vaut_url, seed=seed)
 
     try:
@@ -72,7 +77,7 @@ async def execute_single_run(
     diagnostics = DiagnosticMetrics(latency_p50_ms=p50, latency_p95_ms=p95, tool_call_success_rate=1.0)
 
     eva_a, eva_x = await asyncio.gather(
-        _eva_a.compute(test_case, turns, actual_db_state),
+        _eva_a.compute(test_case, turns, actual_db_state),  # type: ignore[union-attr]
         _eva_x.compute(test_case, turns),
     )
 

@@ -92,21 +92,19 @@ async def _async_run_regression_suite(tag: str, fail_below: float) -> dict[str, 
     from vyuha.models.scoring import Verdict
 
     async with AsyncSessionLocal() as db:
-        tc_repo = TestCaseRepo(db)
-        run_repo = RunRepo(db)
-        test_cases = await tc_repo.list(tag=tag, limit=500)
+        test_cases = await TestCaseRepo(db).list(tag=tag, limit=500)
 
     if not test_cases:
         return {"error": f"No test cases tagged '{tag}'", "gate_passed": False}
 
-    async def run_one(tc):
-        async with AsyncSessionLocal() as db:
-            run_repo = RunRepo(db)
-            result = await execute_single_run(tc, mode="text")
-            await run_repo.save(result)
-            return result
+    # Execute all runs concurrently (no DB I/O during execution)
+    results = await asyncio.gather(*[execute_single_run(tc, mode="text") for tc in test_cases])
 
-    results = await asyncio.gather(*[run_one(tc) for tc in test_cases])
+    # Batch-save all results in a single session to avoid exhausting the connection pool
+    async with AsyncSessionLocal() as db:
+        run_repo = RunRepo(db)
+        for result in results:
+            await run_repo.save(result)
     total = len(results)
     passed = sum(1 for r in results if r.verdict == Verdict.PASS)
     pass_rate = passed / total if total else 0.0

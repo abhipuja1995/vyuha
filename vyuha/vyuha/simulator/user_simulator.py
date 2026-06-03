@@ -45,7 +45,12 @@ class ConversationState:
         return self.graph.get_node(self.current_node_id)
 
     def advance(self, agent_response: str) -> bool:
-        """Determine which edge to follow based on agent response. Returns False if terminal."""
+        """
+        Determine which edge to follow based on agent response keywords.
+        Returns False if terminal OR if no edge condition matches the agent response.
+        Returning False on no-match correctly surfaces agent failures rather than
+        silently advancing and masking the deviation.
+        """
         node = self.current_node
         if node is None or node.is_terminal:
             return False
@@ -59,9 +64,14 @@ class ConversationState:
                 self.current_node_id = edge.to_node
                 return True
 
-        # Default: follow first edge
-        self.current_node_id = edges[0].to_node
-        return True
+        # No edge condition matched → agent deviated from expected flow.
+        # Do NOT silently advance; let the runner record this as incomplete.
+        log.warning(
+            "simulator_no_edge_matched",
+            node=self.current_node_id,
+            response_excerpt=agent_response[:120],
+        )
+        return False
 
 
 class UserSimulator:
@@ -127,29 +137,37 @@ class UserSimulator:
         return rng.random() < persona.code_switch.switch_probability
 
     async def _synthesize_code_switched(self, text: str, persona: PersonaConfig) -> bytes:
-        """Interleave segments between primary and secondary language."""
-        from vyuha.tts.sarvam import SarvamTTSProvider
-        sarvam = SarvamTTSProvider()
+        """
+        Interleave segments between primary and secondary language.
+        Routes through tts_factory so provider fallback is always active.
+        """
         cs = persona.code_switch
         if cs is None:
-            req = TTSRequest(text=text, language=persona.language)
+            req = TTSRequest(text=text, language=persona.language,
+                             emotion=persona.emotion, speaking_rate=persona.speaking_rate,
+                             voice_id=persona.tts_voice_id, seed=self._seed)
             result = await tts_factory.synthesize(req)
             return result.audio_bytes
 
         # Simple split: first half primary, second half secondary
         words = text.split()
-        mid = len(words) // 2
-        segments = [
-            (" ".join(words[:mid]), cs.primary_language),
-            (" ".join(words[mid:]), cs.secondary_language),
-        ]
-        result = await sarvam.synthesize_code_switched(
-            segments,
-            emotion=persona.emotion,
-            speaking_rate=persona.speaking_rate,
-            voice_id=persona.tts_voice_id,
+        mid = max(1, len(words) // 2)
+        primary_text = " ".join(words[:mid])
+        secondary_text = " ".join(words[mid:])
+
+        # Synthesize each segment through the factory (uses Sarvam → Azure fallback)
+        primary_req = TTSRequest(text=primary_text, language=cs.primary_language,
+                                 emotion=persona.emotion, speaking_rate=persona.speaking_rate,
+                                 voice_id=persona.tts_voice_id, seed=self._seed)
+        secondary_req = TTSRequest(text=secondary_text, language=cs.secondary_language,
+                                   emotion=persona.emotion, speaking_rate=persona.speaking_rate,
+                                   voice_id="", seed=self._seed)
+
+        primary_result, secondary_result = await asyncio.gather(
+            tts_factory.synthesize(primary_req),
+            tts_factory.synthesize(secondary_req),
         )
-        return result.audio_bytes
+        return primary_result.audio_bytes + secondary_result.audio_bytes
 
     async def run(
         self,

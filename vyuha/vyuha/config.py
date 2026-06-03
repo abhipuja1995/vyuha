@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     default_judge_model: str = "claude-sonnet-4-6"
     fallback_judge_model: str = "gpt-4o"
 
+    # Security — set VYUHA_API_KEY to enable API key auth on all endpoints
+    vyuha_api_key: str = ""
+    # Comma-separated allowed CORS origins, e.g. "http://localhost:3000,https://vyuha.example.com"
+    # Leave empty to allow all origins (not recommended for production)
+    api_allowed_origins: str = ""
+
     # Audio file storage (pre-uploaded audio per conversation node, bypasses TTS)
     audio_storage_path: str = "/tmp/vyuha/audio"
 

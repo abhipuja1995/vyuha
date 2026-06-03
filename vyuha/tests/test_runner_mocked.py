@@ -6,18 +6,14 @@ latency diagnostics, and critical safety path.
 """
 from __future__ import annotations
 
-import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
-from vyuha.models.scoring import (
-    EvaAScore, EvaXScore, DiagnosticMetrics, Verdict, TurnResult,
-)
+from vyuha.models.scoring import EvaAScore, EvaXScore, Verdict, TurnResult
 from vyuha.models.rca import RCACode, RCATag
 from vyuha.models.test_case import (
-    TestCase, TestCategory, PersonaConfig, Language, NoiseProfile, Emotion,
-    ConversationGraph, ConversationNode, ConversationEdge, ToolCallSpec,
+    TestCase, TestCategory, PersonaConfig, Language,
+    ConversationGraph, ConversationNode, ConversationEdge,
 )
 
 
@@ -43,7 +39,7 @@ def _make_tc(category: TestCategory = TestCategory.HAPPY_PATH) -> TestCase:
     )
 
 
-def _make_turns(latencies: list[float] = None) -> list[TurnResult]:
+def _make_turns(latencies: list[float] | None = None) -> list[TurnResult]:
     latencies = latencies or [200.0, 350.0]
     return [
         TurnResult(
@@ -68,7 +64,19 @@ def _neutral_eva_x() -> EvaXScore:
     return EvaXScore(conciseness=0.9, conversation_progression=0.9, turn_taking=0.85)
 
 
-# ─── Runner: PASS verdict ─────────────────────────────────────────────────────
+def _mock_scorers(eva_a_result, eva_x_result, rca_result=None):
+    """Build a mock_get_scorers return value."""
+    mock_eva_a = MagicMock()
+    mock_eva_a.compute = AsyncMock(return_value=eva_a_result)
+    mock_eva_x = MagicMock()
+    mock_eva_x.compute = AsyncMock(return_value=eva_x_result)
+    mock_rca = MagicMock()
+    if rca_result:
+        mock_rca.tag = AsyncMock(return_value=rca_result)
+    return (mock_eva_a, mock_eva_x, mock_rca)
+
+
+# ─── PASS verdict ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_pass_verdict_when_eva_a_passes():
@@ -77,16 +85,10 @@ async def test_runner_pass_verdict_when_eva_a_passes():
 
     with (
         patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim,
-        patch("vyuha.orchestrator.runner._eva_a") as mock_eva_a,
-        patch("vyuha.orchestrator.runner._eva_x") as mock_eva_x,
-        patch("vyuha.orchestrator.runner._rca") as mock_rca,
+        patch("vyuha.orchestrator.runner._get_scorers") as mock_get_scorers,
     ):
-        mock_instance = AsyncMock()
-        mock_instance.run.return_value = turns
-        MockSim.return_value = mock_instance
-
-        mock_eva_a.compute = AsyncMock(return_value=_passing_eva_a())
-        mock_eva_x.compute = AsyncMock(return_value=_neutral_eva_x())
+        MockSim.return_value.run = AsyncMock(return_value=turns)
+        mock_get_scorers.return_value = _mock_scorers(_passing_eva_a(), _neutral_eva_x())
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
@@ -96,29 +98,23 @@ async def test_runner_pass_verdict_when_eva_a_passes():
     assert result.eva_a.composite == pytest.approx(1.0)
 
 
-# ─── Runner: FAIL verdict + failure report ────────────────────────────────────
+# ─── FAIL verdict + failure report ───────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_fail_verdict_generates_failure_report():
     tc = _make_tc()
     turns = _make_turns()
+    rca_tag = RCATag.from_code(RCACode.LLM_HALLUCINATION, turn_index=1, confidence=0.8)
 
     with (
         patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim,
-        patch("vyuha.orchestrator.runner._eva_a") as mock_eva_a,
-        patch("vyuha.orchestrator.runner._eva_x") as mock_eva_x,
-        patch("vyuha.orchestrator.runner._rca") as mock_rca,
+        patch("vyuha.orchestrator.runner._get_scorers") as mock_get_scorers,
     ):
-        mock_instance = AsyncMock()
-        mock_instance.run.return_value = turns
-        MockSim.return_value = mock_instance
-
-        mock_eva_a.compute = AsyncMock(return_value=_failing_eva_a())
-        mock_eva_x.compute = AsyncMock(return_value=_neutral_eva_x())
-
-        # RCA returns no critical tags
-        rca_tag = RCATag.from_code(RCACode.LLM_HALLUCINATION, turn_index=1, confidence=0.8)
-        mock_rca.tag = AsyncMock(return_value=([rca_tag], 1, "Agent hallucinated pricing"))
+        MockSim.return_value.run = AsyncMock(return_value=turns)
+        mock_get_scorers.return_value = _mock_scorers(
+            _failing_eva_a(), _neutral_eva_x(),
+            rca_result=([rca_tag], 1, "Agent hallucinated pricing"),
+        )
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
@@ -129,79 +125,64 @@ async def test_runner_fail_verdict_generates_failure_report():
     assert "hallucinated" in result.failure_report.failure_excerpt.lower()
 
 
-# ─── Runner: ERROR when simulator raises ─────────────────────────────────────
+# ─── ERROR when simulator raises ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_returns_error_verdict_on_simulator_exception():
     tc = _make_tc()
 
     with patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim:
-        mock_instance = AsyncMock()
-        mock_instance.run.side_effect = RuntimeError("TTS provider unavailable")
-        MockSim.return_value = mock_instance
+        MockSim.return_value.run = AsyncMock(side_effect=RuntimeError("TTS provider unavailable"))
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
 
     assert result.verdict == Verdict.ERROR
-    assert result.error_message is not None
     assert "TTS provider unavailable" in result.error_message
     assert result.eva_a.composite == pytest.approx(0.0)
 
 
-# ─── Runner: latency diagnostics ─────────────────────────────────────────────
+# ─── Latency diagnostics ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_computes_latency_diagnostics():
     tc = _make_tc()
-    # 10 turns with increasing latencies to test p50/p95 calculation
     latencies = [100.0 * (i + 1) for i in range(10)]
     turns = _make_turns(latencies)
 
     with (
         patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim,
-        patch("vyuha.orchestrator.runner._eva_a") as mock_eva_a,
-        patch("vyuha.orchestrator.runner._eva_x") as mock_eva_x,
-        patch("vyuha.orchestrator.runner._rca"),
+        patch("vyuha.orchestrator.runner._get_scorers") as mock_get_scorers,
     ):
-        mock_instance = AsyncMock()
-        mock_instance.run.return_value = turns
-        MockSim.return_value = mock_instance
-        mock_eva_a.compute = AsyncMock(return_value=_passing_eva_a())
-        mock_eva_x.compute = AsyncMock(return_value=_neutral_eva_x())
+        MockSim.return_value.run = AsyncMock(return_value=turns)
+        mock_get_scorers.return_value = _mock_scorers(_passing_eva_a(), _neutral_eva_x())
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
 
-    # Sorted latencies: [100,200,...,1000]. p50 = index 5 = 600ms, p95 = index 9 = 1000ms
+    # Sorted: [100..1000]. p50 = index 5 = 600ms, p95 = index 9 = 1000ms
     assert result.diagnostics.latency_p50_ms == pytest.approx(600.0)
     assert result.diagnostics.latency_p95_ms == pytest.approx(1000.0)
 
 
-# ─── Runner: critical safety violation ───────────────────────────────────────
+# ─── Critical safety violation ────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_critical_safety_tag_sets_failure_criterion():
-    """When RCA finds a SAFETY_VIOLATION tag, failure_report reflects 'CRITICAL safety violation'."""
     tc = _make_tc(category=TestCategory.CRITICAL)
     turns = _make_turns()
+    safety_tag = RCATag.from_code(RCACode.SAFETY_VIOLATION, turn_index=0, confidence=0.99)
+    assert safety_tag.is_critical
 
     with (
         patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim,
-        patch("vyuha.orchestrator.runner._eva_a") as mock_eva_a,
-        patch("vyuha.orchestrator.runner._eva_x") as mock_eva_x,
-        patch("vyuha.orchestrator.runner._rca") as mock_rca,
+        patch("vyuha.orchestrator.runner._get_scorers") as mock_get_scorers,
     ):
-        mock_instance = AsyncMock()
-        mock_instance.run.return_value = turns
-        MockSim.return_value = mock_instance
-
-        mock_eva_a.compute = AsyncMock(return_value=_failing_eva_a())
-        mock_eva_x.compute = AsyncMock(return_value=_neutral_eva_x())
-
-        safety_tag = RCATag.from_code(RCACode.SAFETY_VIOLATION, turn_index=0, confidence=0.99)
-        assert safety_tag.is_critical
-        mock_rca.tag = AsyncMock(return_value=([safety_tag], 0, "Agent provided dosage when should not"))
+        MockSim.return_value.run = AsyncMock(return_value=turns)
+        mock_get_scorers.return_value = _mock_scorers(
+            _failing_eva_a(), _neutral_eva_x(),
+            rca_result=([safety_tag], 0, "Agent provided dosage when should not"),
+        )
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
@@ -211,7 +192,7 @@ async def test_runner_critical_safety_tag_sets_failure_criterion():
     assert "CRITICAL" in result.failure_report.failed_criterion
 
 
-# ─── Runner: run_id and timing fields populated ───────────────────────────────
+# ─── run_id and timing fields ─────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_runner_populates_run_id_and_test_id():
@@ -220,20 +201,15 @@ async def test_runner_populates_run_id_and_test_id():
 
     with (
         patch("vyuha.simulator.user_simulator.UserSimulator") as MockSim,
-        patch("vyuha.orchestrator.runner._eva_a") as mock_eva_a,
-        patch("vyuha.orchestrator.runner._eva_x") as mock_eva_x,
-        patch("vyuha.orchestrator.runner._rca"),
+        patch("vyuha.orchestrator.runner._get_scorers") as mock_get_scorers,
     ):
-        mock_instance = AsyncMock()
-        mock_instance.run.return_value = turns
-        MockSim.return_value = mock_instance
-        mock_eva_a.compute = AsyncMock(return_value=_passing_eva_a())
-        mock_eva_x.compute = AsyncMock(return_value=_neutral_eva_x())
+        MockSim.return_value.run = AsyncMock(return_value=turns)
+        mock_get_scorers.return_value = _mock_scorers(_passing_eva_a(), _neutral_eva_x())
 
         from vyuha.orchestrator.runner import execute_single_run
         result = await execute_single_run(tc)
 
-    assert result.run_id  # non-empty UUID
+    assert result.run_id
     assert result.test_id == tc.test_id
     assert result.completed_at >= result.started_at
     assert result.latency_ms >= 0

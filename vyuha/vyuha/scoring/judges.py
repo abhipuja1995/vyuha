@@ -104,13 +104,8 @@ class LLMJudge:
             raw = response.choices[0].message.content or "{}"
 
         try:
-            # Strip markdown code fences if present
-            clean = raw.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-            return json.loads(clean)
+            from vyuha.utils.llm import parse_llm_json
+            return parse_llm_json(raw)
         except json.JSONDecodeError:
             log.error("judge_json_parse_failed", model=model, raw=raw[:200])
             return {"score": 0.0, "reason": "Parse error", "raw": raw}
