@@ -99,16 +99,31 @@ async def _test_ollama_stt() -> dict[str, Any]:
     if not settings.ollama_url:
         return {"ok": False, "configured": False}
     base = settings.ollama_url.rstrip("/")
-    reachable = await _ping(f"{base}/api/tags")
-    if not reachable:
-        return {"ok": False, "configured": True, "error": f"Cannot reach {base}"}
+
+    # Try /health first (local_whisper_server), then /api/tags (native Ollama)
+    health_ok = await _ping(f"{base}/health")
+    if health_ok:
+        return {
+            "ok": True,
+            "configured": True,
+            "url": base,
+            "model": settings.ollama_stt_model,
+            "server": "local_whisper_server",
+            "available_models": [settings.ollama_stt_model],
+            "whisper_available": True,
+        }
+
+    # Fallback: check if it's a native Ollama with whisper
     models = await _ollama_models(base)
     has_whisper = any("whisper" in m.lower() for m in models)
+    if not models and not has_whisper:
+        return {"ok": False, "configured": True, "error": f"Cannot reach {base}", "url": base}
     return {
         "ok": has_whisper,
         "configured": True,
         "url": base,
         "model": settings.ollama_stt_model,
+        "server": "ollama",
         "available_models": models,
         "whisper_available": has_whisper,
     }

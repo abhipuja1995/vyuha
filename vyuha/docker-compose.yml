@@ -49,6 +49,18 @@ services:
       - postgres
       - redis
 
+  whisper:
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper
+    ports:
+      - "11435:11435"
+    environment:
+      - WHISPER_MODEL=base
+    volumes:
+      - whisper_cache:/root/.cache/huggingface   # cache model weights across restarts
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -67,3 +79,4 @@ services:
 
 volumes:
   postgres_data:
+  whisper_cache:

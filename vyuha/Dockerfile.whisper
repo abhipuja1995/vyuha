@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# faster-whisper runs on CPU with int8 — no CUDA needed
+RUN pip install --no-cache-dir \
+    faster-whisper \
+    fastapi \
+    uvicorn[standard] \
+    python-multipart
+
+WORKDIR /app
+COPY local_whisper_server.py .
+
+EXPOSE 11435
+
+# Default model: base (~150MB, good balance for Indian-accented speech)
+# Override with WHISPER_MODEL env var: tiny | base | small | medium | large-v3
+ENV WHISPER_MODEL=base
+
+CMD ["sh", "-c", "python local_whisper_server.py --model ${WHISPER_MODEL} --port 11435"]
