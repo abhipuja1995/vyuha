@@ -101,13 +101,13 @@ async def _call_ollama(
 
 
 def active_provider() -> str:
-    """Return label of the best currently-configured LLM provider."""
+    """Return label of the best currently-configured LLM provider. Ollama first."""
+    if settings.local_llm_url:
+        return f"ollama/{settings.local_llm_model}"
     if settings.anthropic_api_key:
         return f"claude/{settings.default_judge_model}"
     if settings.openai_api_key:
         return f"openai/{settings.fallback_judge_model}"
-    if settings.local_llm_url:
-        return f"ollama/{settings.local_llm_model}"
     return "none"
 
 
@@ -117,9 +117,18 @@ async def call(
     max_tokens: int = 2048,
 ) -> LLMResponse:
     """
-    Call the best available LLM. Priority: Anthropic → OpenAI → Ollama.
+    Call the best available LLM. Priority: Ollama (local) → Anthropic → OpenAI.
+    Local Ollama is preferred — cloud keys are fallback.
     Raises RuntimeError if nothing is configured.
     """
+    if settings.local_llm_url:
+        try:
+            resp = await _call_ollama(prompt, system, max_tokens)
+            log.debug("llm_router_used", provider="ollama", model=resp.model)
+            return resp
+        except Exception as exc:
+            log.warning("llm_router_ollama_failed", error=str(exc))
+
     if settings.anthropic_api_key:
         try:
             resp = await _call_anthropic(prompt, system, max_tokens)
@@ -136,16 +145,8 @@ async def call(
         except Exception as exc:
             log.warning("llm_router_openai_failed", error=str(exc))
 
-    if settings.local_llm_url:
-        try:
-            resp = await _call_ollama(prompt, system, max_tokens)
-            log.debug("llm_router_used", provider="ollama", model=resp.model)
-            return resp
-        except Exception as exc:
-            log.warning("llm_router_ollama_failed", error=str(exc))
-
     raise RuntimeError(
-        "No LLM configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or LOCAL_LLM_URL in .env."
+        "No LLM configured. Set LOCAL_LLM_URL, ANTHROPIC_API_KEY, or OPENAI_API_KEY in .env."
     )
 
 

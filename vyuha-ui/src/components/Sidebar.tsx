@@ -2,12 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, FlaskConical, Play, Settings, Mic, BarChart3,
 } from "lucide-react";
 import { clsx } from "clsx";
-import { apiFetch, ActiveLLM } from "@/lib/api";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -17,36 +15,9 @@ const NAV = [
   { href: "/settings", label: "Providers", icon: Settings },
 ];
 
-function ActiveLLMBadge() {
-  const { data } = useQuery({
-    queryKey: ["active-llm"],
-    queryFn: () => apiFetch<ActiveLLM>("/api/active-llm"),
-    refetchInterval: 30_000,
-    staleTime: 20_000,
-  });
-
-  if (!data || !data.configured) return (
-    <div className="px-4 pb-3">
-      <span className="text-xs text-white/20 italic">No LLM configured</span>
-    </div>
-  );
-
-  const [prefix, model] = data.provider.split("/");
-  return (
-    <div className="px-4 pb-3">
-      <div className="bg-white/5 rounded-lg px-2.5 py-1.5">
-        <p className="text-xs text-white/30 mb-0.5">Active LLM</p>
-        <p className="text-xs text-white/70 font-medium truncate">{model ?? data.provider}</p>
-        <p className="text-xs text-brand-400 capitalize">{prefix}</p>
-      </div>
-    </div>
-  );
-}
-
 export function Sidebar() {
   const path = usePathname();
 
-  // Test Cases is active for all sub-routes: /test-cases, /generate (now merged), /ingest, /workflows
   const isTestCases = path.startsWith("/test-cases") || path === "/generate"
     || path === "/ingest" || path === "/workflows";
 
@@ -78,10 +49,8 @@ export function Sidebar() {
         })}
       </nav>
 
-      <ActiveLLMBadge />
-
       <div className="px-4 py-3 text-xs text-white/20 border-t border-white/10">
-        v0.1.0 · Phase 3
+        v0.1.0
       </div>
     </aside>
   );

@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef } from "react";
-import { api, TestCase, TestCategory, Language, apiFetch, ActiveLLM } from "@/lib/api";
+import { api, TestCase, TestCategory, Language, apiFetch } from "@/lib/api";
 import { Plus, Play, Trash2, ChevronRight, Wand2, Download, GitBranch, X, Loader2, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import { clsx } from "clsx";
@@ -20,21 +20,6 @@ const LANGUAGE_NAMES: Record<string, string> = {
   "kn": "Kannada", "ml": "Malayalam", "mr": "Marathi", "bn": "Bengali",
   "en-IN": "English (Indian)", "en": "English",
 };
-
-// ── Active LLM badge ──────────────────────────────────────────────────────────
-function ActiveLLMPill() {
-  const { data } = useQuery({
-    queryKey: ["active-llm"],
-    queryFn: () => apiFetch<ActiveLLM>("/api/active-llm"),
-  });
-  if (!data?.configured) return null;
-  const [, model] = data.provider.split("/");
-  return (
-    <span className="text-xs bg-brand-50 text-brand-700 border border-brand-200 px-2 py-0.5 rounded-full font-medium">
-      ✦ {model ?? data.provider}
-    </span>
-  );
-}
 
 // ── Unified Create Panel ──────────────────────────────────────────────────────
 type CreateMethod = "generate" | "ingest" | "workflow" | null;
@@ -97,23 +82,17 @@ function CreatePanel({ onClose, qc }: { onClose: () => void; qc: ReturnType<type
 function GenerateForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typeof useQueryClient> }) {
   const [form, setForm] = useState({ system_prompt: "", knowledge_base: "", use_cases: "", language: "en-IN", count: 50 });
   const [done, setDone] = useState<number | null>(null);
-  const { data: activeLLM } = useQuery({ queryKey: ["active-llm"], queryFn: () => apiFetch<ActiveLLM>("/api/active-llm") });
 
   const mutation = useMutation({
     mutationFn: () => api.generate.fromPrompt(form as any),
     onSuccess: (data) => { setDone(data.length); qc.invalidateQueries({ queryKey: ["test-cases"] }); },
   });
 
-  const [, model] = (activeLLM?.provider ?? "").split("/");
-
   return (
     <div className="p-5 space-y-4">
       <div className="flex items-center gap-2">
         <Wand2 className="w-4 h-4 text-brand-500" />
         <span className="font-medium text-sm">Generate from Prompt</span>
-        {activeLLM?.configured && (
-          <span className="ml-auto text-xs text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full">✦ {model}</span>
-        )}
       </div>
       {done !== null ? (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4">
@@ -170,8 +149,6 @@ function IngestForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typeo
   const [lang, setLang] = useState("en-IN");
   const [preview, setPreview] = useState<any>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const { data: activeLLM } = useQuery({ queryKey: ["active-llm"], queryFn: () => apiFetch<ActiveLLM>("/api/active-llm") });
-  const [, model] = (activeLLM?.provider ?? "").split("/");
 
   const previewMutation = useMutation({
     mutationFn: async () => {
@@ -200,9 +177,6 @@ function IngestForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typeo
       <div className="flex items-center gap-2">
         <Download className="w-4 h-4 text-brand-500" />
         <span className="font-medium text-sm">From Production Call</span>
-        {activeLLM?.configured && (
-          <span className="ml-auto text-xs text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full">✦ {model}</span>
-        )}
       </div>
 
       {savedId ? (
@@ -362,7 +336,6 @@ export default function TestCasesPage() {
           <p className="text-sm text-gray-500 mt-0.5">{cases.length} cases in library</p>
         </div>
         <div className="flex items-center gap-3">
-          <ActiveLLMPill />
           <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"

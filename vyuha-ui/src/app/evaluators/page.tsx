@@ -2,10 +2,10 @@
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiFetch, ActiveLLM } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import {
   FlaskConical, Play, ChevronDown, ChevronUp, Plus, Trash2,
-  CheckCircle, XCircle, AlertCircle, Loader2, BarChart3, ArrowRight,
+  CheckCircle, XCircle, AlertCircle, Loader2, BarChart3,
 } from "lucide-react";
 import { clsx } from "clsx";
 
@@ -32,28 +32,27 @@ function verdictIcon(passed: boolean | null) {
   return <AlertCircle className="w-4 h-4 text-gray-400" />;
 }
 
-// ── Evaluator Playground (input → LLM → evaluate) ────────────────────────────
+// ── Evaluator Playground ──────────────────────────────────────────────────────
 
 function EvalPlayground({ evaluators }: { evaluators: EvaluatorMeta[] }) {
-  const [mode, setMode] = useState<"direct" | "llm">("llm");
   const [selected, setSelected] = useState("rouge_score");
   const [userInput, setUserInput] = useState("Mujhe apna account balance batao");
   const [systemPrompt, setSystemPrompt] = useState("You are a banking voice agent. Be concise and helpful.");
   const [expected, setExpected] = useState("Your account balance is");
-  const [directInputs, setDirectInputs] = useState('{\n  "output": "Your account balance is 5000 rupees",\n  "expected": "The balance is 5000"\n}');
   const [config, setConfig] = useState("{}");
   const [result, setResult] = useState<any>(null);
 
-  const { data: activeLLM } = useQuery({ queryKey: ["active-llm"], queryFn: () => apiFetch<ActiveLLM>("/api/active-llm") });
-  const [, model] = (activeLLM?.provider ?? "").split("/");
-
   const runMutation = useMutation({
-    mutationFn: () => {
-      const body = mode === "llm"
-        ? { evaluator: selected, config: JSON.parse(config || "{}"), user_input: userInput, system_prompt: systemPrompt, expected }
-        : { evaluator: selected, inputs: JSON.parse(directInputs), config: JSON.parse(config || "{}") };
-      return apiFetch<any>("/evaluators/run", { method: "POST", body: JSON.stringify(body) });
-    },
+    mutationFn: () => apiFetch<any>("/evaluators/run", {
+      method: "POST",
+      body: JSON.stringify({
+        evaluator: selected,
+        config: JSON.parse(config || "{}"),
+        user_input: userInput,
+        system_prompt: systemPrompt,
+        expected,
+      }),
+    }),
     onSuccess: setResult,
   });
 
@@ -63,34 +62,10 @@ function EvalPlayground({ evaluators }: { evaluators: EvaluatorMeta[] }) {
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
         <FlaskConical className="w-4 h-4 text-brand-500" />
-        <h2 className="font-semibold">Eval Studio</h2>
-        <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-0.5">
-          {(["llm","direct"] as const).map((m) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={clsx("px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                mode === m ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}>
-              {m === "llm" ? "Input → LLM → Evaluate" : "Direct (output known)"}
-            </button>
-          ))}
-        </div>
+        <h2 className="font-semibold">Playground</h2>
       </div>
 
       <div className="p-5 space-y-4">
-        {/* Pipeline diagram */}
-        {mode === "llm" && (
-          <div className="flex items-center gap-2 text-xs text-gray-400 bg-gray-50 rounded-lg px-4 py-2">
-            <span className="bg-white border border-gray-200 px-2 py-0.5 rounded font-medium text-gray-600">User input</span>
-            <ArrowRight className="w-3 h-3" />
-            <span className="bg-brand-50 border border-brand-200 px-2 py-0.5 rounded font-medium text-brand-700">
-              {activeLLM?.configured ? (model ?? "LLM") : "LLM (not configured)"}
-            </span>
-            <ArrowRight className="w-3 h-3" />
-            <span className="bg-white border border-gray-200 px-2 py-0.5 rounded font-medium text-gray-600">Output</span>
-            <ArrowRight className="w-3 h-3" />
-            <span className="bg-white border border-gray-200 px-2 py-0.5 rounded font-medium text-gray-600">Evaluator → Score</span>
-          </div>
-        )}
-
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-medium text-gray-600 mb-1 block">Evaluator</label>
@@ -111,36 +86,26 @@ function EvalPlayground({ evaluators }: { evaluators: EvaluatorMeta[] }) {
           </div>
         </div>
 
-        {mode === "llm" ? (
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">User Input</label>
-              <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} rows={2}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">System Prompt (optional)</label>
-              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={2}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Expected output (for comparison)</label>
-              <input value={expected} onChange={(e) => setExpected(e.target.value)}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" />
-            </div>
-          </div>
-        ) : (
-          <div>
-            <label className="text-xs font-medium text-gray-600 mb-1 block">Inputs (JSON) — provide output + expected directly</label>
-            <textarea value={directInputs} onChange={(e) => setDirectInputs(e.target.value)} rows={5}
-              className="w-full text-sm font-mono border border-gray-200 rounded-lg px-3 py-2 resize-none" />
-          </div>
-        )}
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">Input</label>
+          <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} rows={2}
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">System context (optional)</label>
+          <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={2}
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">Expected output</label>
+          <input value={expected} onChange={(e) => setExpected(e.target.value)}
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" />
+        </div>
 
         <button onClick={() => runMutation.mutate()} disabled={runMutation.isPending}
           className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
           {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {mode === "llm" ? "Run: Input → LLM → Evaluate" : "Run evaluator"}
+          Run
         </button>
 
         {runMutation.isError && (
@@ -148,22 +113,22 @@ function EvalPlayground({ evaluators }: { evaluators: EvaluatorMeta[] }) {
         )}
 
         {result && (
-          <div className="space-y-2">
-            {result.llm_output && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-xs text-blue-500 mb-1">LLM output <span className="text-blue-400">({result.llm_provider})</span></p>
-                <p className="text-sm text-blue-900">{result.llm_output}</p>
-              </div>
-            )}
-            <div className={clsx("rounded-xl border p-4", result.passed === true ? "bg-green-50 border-green-200" : result.passed === false ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200")}>
-              <div className="flex items-center gap-2 mb-2">
-                {verdictIcon(result.passed)}
-                <span className="font-medium text-sm">{result.passed === true ? "Passed" : result.passed === false ? "Failed" : "No threshold"}</span>
-                <span className="ml-auto text-xs text-gray-400">{result.runtime_ms?.toFixed(1)}ms</span>
-              </div>
-              <div className="text-sm"><span className="text-gray-500">Score: </span><code className="font-mono text-brand-700">{String(result.value)}</code></div>
-              <p className="text-xs text-gray-600 mt-1">{result.reason}</p>
+          <div className={clsx("rounded-xl border p-4",
+            result.passed === true ? "bg-green-50 border-green-200"
+            : result.passed === false ? "bg-red-50 border-red-200"
+            : "bg-gray-50 border-gray-200")}>
+            <div className="flex items-center gap-2 mb-2">
+              {verdictIcon(result.passed)}
+              <span className="font-medium text-sm">
+                {result.passed === true ? "Passed" : result.passed === false ? "Failed" : "Scored"}
+              </span>
+              <span className="ml-auto text-xs text-gray-400">{result.runtime_ms?.toFixed(0)}ms</span>
             </div>
+            <div className="text-sm mb-1">
+              <span className="text-gray-500">Score: </span>
+              <code className="font-mono font-semibold text-brand-700">{String(result.value)}</code>
+            </div>
+            <p className="text-xs text-gray-500">{result.reason}</p>
           </div>
         )}
       </div>
@@ -302,7 +267,7 @@ export default function EvaluatorsPage() {
       <div>
         <h1 className="text-2xl font-bold">Eval Studio</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          {evaluators.length} evaluators — run any input through the active LLM, then score the output
+          {evaluators.length} evaluators — heuristic, similarity, audio, agent, retrieval, safety
         </p>
       </div>
 
