@@ -165,7 +165,7 @@ class IngestionPipeline:
 
         persona = PersonaConfig(
             language=lang,
-            accent_variant=persona_data.accent_variant,
+            accent_variant=persona_data.accent_variant or "",
             noise_profile=noise,
             emotion=emotion,
             speaking_rate=persona_data.speaking_rate,

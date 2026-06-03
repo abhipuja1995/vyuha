@@ -84,8 +84,11 @@ function GenerateForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typ
   const [done, setDone] = useState<number | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () => api.generate.fromPrompt(form as any),
-    onSuccess: (data) => { setDone(data.length); qc.invalidateQueries({ queryKey: ["test-cases"] }); },
+    mutationFn: () => apiFetch<{ count: number; test_cases: any[] }>("/generate/from-prompt", {
+      method: "POST",
+      body: JSON.stringify(form),
+    }),
+    onSuccess: (data) => { setDone(data.count); qc.invalidateQueries({ queryKey: ["test-cases"] }); },
   });
 
   return (
@@ -97,9 +100,10 @@ function GenerateForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typ
       {done !== null ? (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4">
           <div className="flex items-center gap-2 text-green-700 font-medium">
-            <CheckCircle className="w-4 h-4" /> {done} test cases generated
+            <CheckCircle className="w-4 h-4" /> {done} test case{done !== 1 ? "s" : ""} created
           </div>
-          <button onClick={onClose} className="mt-3 text-sm text-brand-600 hover:underline">Close panel</button>
+          <p className="text-xs text-green-600 mt-1">Added to your test library.</p>
+          <button onClick={onClose} className="mt-3 text-sm text-brand-600 hover:underline">Close</button>
         </div>
       ) : (
         <>
@@ -133,9 +137,14 @@ function GenerateForm({ onClose, qc }: { onClose: () => void; qc: ReturnType<typ
           <button onClick={() => mutation.mutate()} disabled={form.system_prompt.length < 100 || mutation.isPending}
             className="w-full flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            {mutation.isPending ? `Generating ${form.count} scenarios…` : `Generate ${form.count} test cases`}
+            {mutation.isPending ? `Generating…` : `Generate test cases`}
           </button>
-          {mutation.isError && <p className="text-xs text-red-600">{(mutation.error as Error).message}</p>}
+          {mutation.isError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700 space-y-1">
+              <p className="font-medium">Generation failed</p>
+              <p>{(mutation.error as Error).message}</p>
+            </div>
+          )}
         </>
       )}
     </div>

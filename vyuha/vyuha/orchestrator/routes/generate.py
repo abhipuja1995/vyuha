@@ -33,26 +33,37 @@ class GenerateRequest(BaseModel):
     count: int = 50
 
 
-@router.post("/from-prompt", response_model=list[TestCase])
-async def generate_from_prompt(req: GenerateRequest, db: DbDep) -> list[TestCase]:
+@router.post("/from-prompt")
+async def generate_from_prompt(req: GenerateRequest, db: DbDep) -> dict:
     if len(req.system_prompt) < 100:
         raise HTTPException(
             status_code=400,
             detail="System prompt too short (minimum 100 characters)",
         )
 
-    test_cases = await _get_generator().generate(
-        system_prompt=req.system_prompt,
-        knowledge_base=req.knowledge_base,
-        tools=req.tools,
-        flow_description=req.flow_description,
-        language=req.language,
-        use_cases=req.use_cases,
-        count=req.count,
-    )
+    try:
+        test_cases = await _get_generator().generate(
+            system_prompt=req.system_prompt,
+            knowledge_base=req.knowledge_base,
+            tools=req.tools,
+            flow_description=req.flow_description,
+            language=req.language,
+            use_cases=req.use_cases,
+            count=req.count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    if not test_cases:
+        raise HTTPException(
+            status_code=422,
+            detail="LLM returned no parseable test cases. Try a more detailed prompt or reduce the count.",
+        )
 
     repo = TestCaseRepo(db)
     for tc in test_cases:
         await repo.save(tc)
 
-    return test_cases
+    return {"count": len(test_cases), "test_cases": [tc.model_dump(mode="json") for tc in test_cases]}
