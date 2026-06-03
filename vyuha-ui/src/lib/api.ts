@@ -112,6 +112,47 @@ export interface Summary {
 
 // ─── API functions ────────────────────────────────────────────────────────────
 
+// ─── Provider Settings ────────────────────────────────────────────────────────
+
+export interface ProviderEntry {
+  provider: string;
+  configured: boolean;
+  ok?: boolean;
+  url?: string | null;
+  model?: string;
+  error?: string;
+  available_models?: string[];
+  reachable?: boolean;
+  api_key_set?: boolean;
+  // STT-specific
+  llm_url?: string | null;
+  llm_model?: string;
+  whisper_available?: boolean;
+  // TTS/Azure-specific
+  region?: string;
+  voice?: string;
+  note?: string;
+  status_code?: number;
+}
+
+export interface ProviderStatus {
+  llm: { primary: ProviderEntry; fallback: ProviderEntry; local: ProviderEntry };
+  stt: { ollama_whisper: ProviderEntry };
+  tts: { local: ProviderEntry; sarvam: ProviderEntry; azure: ProviderEntry };
+  active_providers: { llm_judge: string; stt: string; tts: string };
+}
+
+export interface ProviderConfig {
+  local_llm_url?: string;
+  local_llm_model?: string;
+  local_tts_url?: string;
+  local_tts_voice?: string;
+  ollama_url?: string;
+  ollama_stt_model?: string;
+  ollama_llm_url?: string;
+  ollama_llm_model?: string;
+}
+
 export const api = {
   testCases: {
     list: (params?: { category?: TestCategory; language?: Language; tag?: string }) =>
@@ -158,6 +199,17 @@ export const api = {
           return r.json() as Promise<IngestResult>;
         });
     },
+  },
+  settings: {
+    providers: () => apiFetch<ProviderStatus>("/settings/providers"),
+    updateProviders: (config: ProviderConfig) =>
+      apiFetch<{ updated: Record<string, string>; message: string }>("/settings/providers", {
+        method: "POST",
+        body: JSON.stringify(config),
+      }),
+    testLLM: () => apiFetch<Record<string, ProviderEntry>>("/settings/providers/test/llm"),
+    testSTT: () => apiFetch<ProviderEntry>("/settings/providers/test/stt"),
+    testTTS: () => apiFetch<Record<string, ProviderEntry>>("/settings/providers/test/tts"),
   },
   audio: {
     upload: (testId: string, nodeId: string, file: File) => {

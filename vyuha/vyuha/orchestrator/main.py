@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from vyuha.config import settings
 from vyuha.orchestrator.routes import test_cases, runs, reports, generate, ingest, audio
+from vyuha.orchestrator.routes import settings as settings_route
 
 log = structlog.get_logger()
 
@@ -72,6 +73,7 @@ app.include_router(reports.router, prefix="/reports", tags=["Reports"])
 app.include_router(generate.router, prefix="/generate", tags=["Generation"])
 app.include_router(ingest.router, prefix="/ingest", tags=["Ingestion"])
 app.include_router(audio.router, prefix="/test-cases", tags=["Audio"])
+app.include_router(settings_route.router, prefix="/settings/providers", tags=["Settings"])
 
 
 @app.get("/health")

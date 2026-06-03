@@ -23,18 +23,27 @@ class Settings(BaseSettings):
     azure_speech_region: str = "eastus"
     elevenlabs_api_key: str = ""
 
-    # STT — local Whisper server (local_whisper_server.py or any OpenAI-compatible STT)
-    # Set to tunnel URL when API runs on Railway (e.g. https://xyz.trycloudflare.com)
-    ollama_url: str = ""          # STT server URL (exposes /v1/audio/transcriptions)
-    ollama_stt_model: str = "whisper"   # model name passed to the STT server
+    # STT — Ollama/Whisper (any OpenAI-compatible /v1/audio/transcriptions endpoint)
+    # host.docker.internal:11434 reaches the Mac host from inside Docker
+    ollama_url: str = ""          # STT server URL
+    ollama_stt_model: str = "whisper"
 
-    # LLM turn-formatting — separate Ollama instance for agent/user labelling
-    # Set OLLAMA_LLM_URL to the Ollama server URL (separate from STT server)
-    # e.g. https://abc.trycloudflare.com → http://localhost:11434
+    # LLM turn-formatting via local Ollama
     ollama_llm_url: str = ""      # Ollama LLM URL; "" = skip turn-formatting
-    ollama_llm_model: str = "llama3.2"  # model to use for turn-formatting
+    ollama_llm_model: str = "llama3.2"
 
-    # Other STT providers (future)
+    # Local LLM judge — overrides Anthropic/OpenAI for scoring when set
+    # Must expose an OpenAI-compatible /v1/chat/completions endpoint
+    local_llm_url: str = ""       # e.g. http://host.docker.internal:11434/v1
+    local_llm_model: str = "llama3.2"
+
+    # Local TTS — any OpenAI-compatible /v1/audio/speech endpoint
+    # e.g. openedai-speech, kokoro-fastapi running on the host
+    local_tts_url: str = ""       # e.g. http://host.docker.internal:8880
+    local_tts_model: str = "tts-1"
+    local_tts_voice: str = "alloy"
+
+    # Other STT providers
     deepgram_api_key: str = ""
 
     # VAUT connection

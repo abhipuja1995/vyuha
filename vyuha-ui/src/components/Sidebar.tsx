@@ -14,6 +14,7 @@ const NAV = [
   { href: "/runs", label: "Runs", icon: Play },
   { href: "/generate", label: "Generate", icon: Wand2 },
   { href: "/ingest", label: "Ingest Calls", icon: Download },
+  { href: "/settings", label: "Providers", icon: Settings },
 ];
 
 export function Sidebar() {

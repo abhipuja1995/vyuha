@@ -6,21 +6,23 @@ from vyuha.models.test_case import Language
 from vyuha.tts.base import TTSProvider, TTSRequest, TTSResult
 from vyuha.tts.sarvam import SarvamTTSProvider
 from vyuha.tts.azure import AzureTTSProvider
+from vyuha.tts.local import LocalTTSProvider
 
 log = structlog.get_logger()
 
 
 class TTSFactory:
     """
-    Selects TTS provider with Sarvam primary, Azure fallback.
-    Falls back automatically on provider error.
+    Selects TTS provider in priority order: Local → Sarvam → Azure.
+    Falls back automatically on provider error or missing configuration.
     """
 
     def __init__(self) -> None:
+        self._local = LocalTTSProvider()
         self._sarvam = SarvamTTSProvider()
         self._azure = AzureTTSProvider()
-        # ordered preference: Sarvam → Azure
-        self._providers: list[TTSProvider] = [self._sarvam, self._azure]
+        # ordered preference: Local (if configured) → Sarvam → Azure
+        self._providers: list[TTSProvider] = [self._local, self._sarvam, self._azure]
 
     def _select_provider(self, language: Language) -> list[TTSProvider]:
         """Return providers that support the language, in preference order."""
