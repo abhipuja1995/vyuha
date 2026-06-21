@@ -29,8 +29,8 @@ def list_all() -> list[dict[str, Any]]:
 
 def _auto_register() -> None:
     """Register all evaluators on import."""
-    from vyuha.evaluators import heuristic, similarity, audio, agent, retrieval, safety
-    modules = [heuristic, similarity, audio, agent, retrieval, safety]
+    from vyuha.evaluators import heuristic, similarity, audio, agent, retrieval, safety, llm_judge, classification, code
+    modules = [heuristic, similarity, audio, agent, retrieval, safety, llm_judge, classification, code]
     for mod in modules:
         for attr in dir(mod):
             obj = getattr(mod, attr)

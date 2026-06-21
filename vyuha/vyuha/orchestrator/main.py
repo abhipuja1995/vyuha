@@ -13,6 +13,12 @@ from vyuha.orchestrator.routes import test_cases, runs, reports, generate, inges
 from vyuha.orchestrator.routes import settings as settings_route
 from vyuha.orchestrator.routes import evaluators as evaluators_route
 from vyuha.orchestrator.routes import workflows as workflows_route
+from vyuha.orchestrator.routes import datasets as datasets_route
+from vyuha.orchestrator.routes import traces as traces_route
+from vyuha.orchestrator.routes import prompts as prompts_route
+from vyuha.orchestrator.routes import alerts as alerts_route
+from vyuha.orchestrator.routes import agents as agents_route
+from vyuha.orchestrator.routes import annotations as annotations_route
 
 log = structlog.get_logger()
 
@@ -79,6 +85,12 @@ app.include_router(eval_route.router, prefix="/eval", tags=["Evaluation"])
 app.include_router(evaluators_route.router, prefix="/evaluators", tags=["Evaluators"])
 app.include_router(workflows_route.router, prefix="/workflows", tags=["Workflows"])
 app.include_router(settings_route.router, prefix="/settings/providers", tags=["Settings"])
+app.include_router(datasets_route.router, prefix="/datasets", tags=["Datasets"])
+app.include_router(traces_route.router, prefix="/traces", tags=["Traces"])
+app.include_router(prompts_route.router, prefix="/prompts", tags=["Prompts"])
+app.include_router(alerts_route.router, prefix="/alerts", tags=["Alerts"])
+app.include_router(agents_route.router, prefix="/agents", tags=["Agents"])
+app.include_router(annotations_route.router, prefix="/annotations", tags=["Annotations"])
 
 
 @app.get("/health")
