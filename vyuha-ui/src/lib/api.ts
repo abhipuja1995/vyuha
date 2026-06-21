@@ -162,6 +162,124 @@ export interface ActiveLLM {
   label: string;
 }
 
+export interface Dataset {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  row_count: number;
+  column_types: Record<string, string>;
+  created_at: string;
+}
+
+export interface DatasetItem {
+  id: string;
+  dataset_id: string;
+  row_index: number;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Trace {
+  id: string;
+  name: string;
+  session_id?: string;
+  user_id?: string;
+  tags: string[];
+  created_at: string;
+  span_count?: number;
+}
+
+export interface Span {
+  id: string;
+  trace_id: string;
+  parent_span_id?: string;
+  span_kind: string;
+  operation_name: string;
+  start_time: string;
+  end_time?: string;
+  latency_ms?: number;
+  model?: string;
+  provider?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost_usd?: number;
+  status: string;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  tags: string[];
+  attributes: Record<string, unknown>;
+}
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  description: string;
+  folder?: string;
+  created_at: string;
+  versions?: PromptVersion[];
+}
+
+export interface PromptVersion {
+  id: string;
+  template_id: string;
+  version_number: number;
+  label: string;
+  messages: Array<{ role: string; content: string }>;
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+  commit_message: string;
+  created_at: string;
+}
+
+export interface AlertMonitor {
+  id: string;
+  name: string;
+  metric_type: string;
+  threshold_operator: string;
+  warning_threshold?: number;
+  critical_threshold?: number;
+  check_interval_minutes: number;
+  notification_emails: string[];
+  is_muted: boolean;
+  created_at: string;
+}
+
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  agent_type: string;
+  voice_provider?: string;
+  config: Record<string, unknown>;
+  system_prompt: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AnnotationQueue {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  annotations_required: number;
+  labels: Array<{ name: string; type: string; options?: string[] }>;
+  created_at: string;
+  items?: AnnotationItem[];
+}
+
+export interface AnnotationItem {
+  id: string;
+  queue_id: string;
+  source_type: string;
+  source_id: string;
+  status: string;
+  annotations: Array<{ label: string; value: unknown; annotator: string; notes: string }>;
+  created_at: string;
+}
+
 export const api = {
   testCases: {
     list: (params?: { category?: TestCategory; language?: Language; tag?: string }) =>
@@ -233,5 +351,68 @@ export const api = {
     url: (testId: string, nodeId: string) => `${API_BASE}/test-cases/${testId}/nodes/${nodeId}/audio`,
     delete: (testId: string, nodeId: string) =>
       apiFetch<{ deleted: boolean }>(`/test-cases/${testId}/nodes/${nodeId}/audio`, { method: "DELETE" }),
+  },
+  datasets: {
+    list: () => apiFetch<Dataset[]>("/datasets/"),
+    get: (id: string) => apiFetch<Dataset & { items: DatasetItem[] }>(`/datasets/${id}`),
+    create: (body: { name: string; description?: string; source?: string }) => apiFetch<Dataset>("/datasets/", { method: "POST", body: JSON.stringify(body) }),
+    delete: (id: string) => apiFetch<{ deleted: string }>(`/datasets/${id}`, { method: "DELETE" }),
+    addRows: (id: string, rows: Record<string, unknown>[]) => apiFetch<{ added: number }>(`/datasets/${id}/rows`, { method: "POST", body: JSON.stringify(rows) }),
+    upload: (file: File, name: string, description = "") => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("name", name);
+      form.append("description", description);
+      return fetch(`${API_BASE}/datasets/upload`, { method: "POST", body: form }).then(async r => { if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`); return r.json() as Promise<Dataset>; });
+    },
+    export: (id: string) => apiFetch<{ rows: DatasetItem[] }>(`/datasets/${id}/export`),
+  },
+  traces: {
+    list: (params?: { session_id?: string; user_id?: string; limit?: number }) =>
+      apiFetch<Trace[]>(`/traces/${params ? "?" + new URLSearchParams(params as Record<string, string>) : ""}`),
+    get: (id: string) => apiFetch<Trace & { spans: Span[] }>(`/traces/${id}`),
+    create: (body: Partial<Trace>) => apiFetch<Trace>("/traces/", { method: "POST", body: JSON.stringify(body) }),
+    delete: (id: string) => apiFetch<{ deleted: string }>(`/traces/${id}`, { method: "DELETE" }),
+    stats: () => apiFetch<{ total_traces: number; total_spans: number; avg_latency_ms: number; total_tokens: number; total_cost_usd: number }>("/traces/stats"),
+    ingestOtlp: (payload: unknown) => apiFetch<{ traces_created: number; spans_created: number }>("/traces/ingest/otlp", { method: "POST", body: JSON.stringify(payload) }),
+  },
+  prompts: {
+    list: () => apiFetch<PromptTemplate[]>("/prompts/"),
+    get: (id: string) => apiFetch<PromptTemplate>(`/prompts/${id}`),
+    create: (body: { name: string; description?: string; folder?: string }) => apiFetch<PromptTemplate>("/prompts/", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<PromptTemplate>) => apiFetch<PromptTemplate>(`/prompts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    delete: (id: string) => apiFetch<{ deleted: string }>(`/prompts/${id}`, { method: "DELETE" }),
+    createVersion: (id: string, body: Partial<PromptVersion>) => apiFetch<PromptVersion>(`/prompts/${id}/versions`, { method: "POST", body: JSON.stringify(body) }),
+    updateVersion: (id: string, vid: string, body: { label: string }) => apiFetch<PromptVersion>(`/prompts/${id}/versions/${vid}`, { method: "PUT", body: JSON.stringify(body) }),
+    deleteVersion: (id: string, vid: string) => apiFetch<{ deleted: string }>(`/prompts/${id}/versions/${vid}`, { method: "DELETE" }),
+    runVersion: (id: string, vid: string, variables: Record<string, string>) => apiFetch<{ output: string; provider: string; latency_ms: number }>(`/prompts/${id}/versions/${vid}/run`, { method: "POST", body: JSON.stringify({ variables }) }),
+    compare: (id: string, version_ids: string[], input_variables: Record<string, string>) => apiFetch<{ versions: Array<{ version_id: string; version_number: number; label: string; output: string; provider: string; latency_ms: number }> }>(`/prompts/${id}/compare`, { method: "POST", body: JSON.stringify({ version_ids, input_variables }) }),
+  },
+  alerts: {
+    list: () => apiFetch<AlertMonitor[]>("/alerts/"),
+    get: (id: string) => apiFetch<AlertMonitor>(`/alerts/${id}`),
+    create: (body: Partial<AlertMonitor>) => apiFetch<AlertMonitor>("/alerts/", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<AlertMonitor>) => apiFetch<AlertMonitor>(`/alerts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    delete: (id: string) => apiFetch<{ deleted: string }>(`/alerts/${id}`, { method: "DELETE" }),
+    mute: (id: string) => apiFetch<{ is_muted: boolean }>(`/alerts/${id}/mute`, { method: "POST" }),
+    check: (id: string) => apiFetch<{ status: string; current_value: number; metric_type: string; checked_at: string }>(`/alerts/${id}/check`, { method: "POST" }),
+  },
+  agents: {
+    list: () => apiFetch<AgentDefinition[]>("/agents/"),
+    get: (id: string) => apiFetch<AgentDefinition>(`/agents/${id}`),
+    create: (body: Partial<AgentDefinition>) => apiFetch<AgentDefinition>("/agents/", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<AgentDefinition>) => apiFetch<AgentDefinition>(`/agents/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    delete: (id: string) => apiFetch<{ deleted: string }>(`/agents/${id}`, { method: "DELETE" }),
+    test: (id: string) => apiFetch<{ connected: boolean; error?: string; note?: string }>(`/agents/${id}/test`, { method: "POST" }),
+    importCall: (id: string, call_id: string) => apiFetch<{ call_id: string; transcript: unknown }>(`/agents/${id}/import-call`, { method: "POST", body: JSON.stringify({ call_id }) }),
+  },
+  annotations: {
+    listQueues: () => apiFetch<AnnotationQueue[]>("/annotations/queues"),
+    getQueue: (id: string) => apiFetch<AnnotationQueue>(`/annotations/queues/${id}`),
+    createQueue: (body: Partial<AnnotationQueue>) => apiFetch<AnnotationQueue>("/annotations/queues", { method: "POST", body: JSON.stringify(body) }),
+    deleteQueue: (id: string) => apiFetch<{ deleted: string }>(`/annotations/queues/${id}`, { method: "DELETE" }),
+    addItem: (queueId: string, body: { source_type: string; source_id: string }) => apiFetch<AnnotationItem>(`/annotations/queues/${queueId}/items`, { method: "POST", body: JSON.stringify(body) }),
+    annotate: (queueId: string, itemId: string, body: { label: string; value: unknown; annotator?: string; notes?: string }) => apiFetch<AnnotationItem>(`/annotations/queues/${queueId}/items/${itemId}/annotate`, { method: "POST", body: JSON.stringify(body) }),
+    queueStats: (id: string) => apiFetch<{ total: number; pending: number; completed: number; completion_rate: number }>(`/annotations/queues/${id}/stats`),
   },
 };
